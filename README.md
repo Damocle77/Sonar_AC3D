@@ -3,7 +3,7 @@
 > “L’audio perfetto non è solo udibile... è percepibile come un eco nel Vuoto Spaziale.”
 
 **converti_2AC3_sonar.sh** è uno script Bash avanzato per la conversione di tracce audio **Atmos, EAC3, DTS** in **AC3 5.1 a 640kbps**, con filtri psicoacustici dinamici che simulano il suono spaziale 3D (Upfiring) ottimizzati per impianti AVR Classici (Ottimizzato su **Kenwood RV-6000 + KC-1 300HT + SW-40HT)**.  
-La versione **v5.4** garantisce uniformità spaziale e compensazione dinamica chirurgica su **canali vocali e LFE**, offrendo una resa sonora da vero Jedi 5.1.
+Questa pipeline ffmpeg garantisce uniformità spaziale e compensazione dinamica chirurgica su **canali vocali e LFE**, offrendo una resa sonora da vero Jedi 5.1.
 
 ---
 
