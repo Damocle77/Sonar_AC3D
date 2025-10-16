@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #================================================================================================
-# CONVERTI_EAC3-AC3_SONAR.sh v5.5 - [ARCHITETTURA DINAMICA PER HOME CINEMA]
+# CONVERTI_EAC3-AC3_SONAR.sh - [ARCHITETTURA DINAMICA PER HOME CINEMA]
 # ===============================================================================================
 #
 # DESCRIZIONE:
@@ -253,3 +253,4 @@ ok "Batch completato! Processati ${#FILES[@]} file"
 echo "====================================================================================="
 echo "Conversione AC3 640k ottimizzata per AVR Kenwood RV600 + KS1-300HT + SW40HT"
 echo "======================================================================================"
+
