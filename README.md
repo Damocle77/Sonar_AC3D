@@ -1,4 +1,4 @@
-# 🎧 converti_2AC3_sonar.sh
+# 🎧 converti_2AC3_onar.sh
 
 > “L’audio perfetto non è solo udibile... è percepibile come un eco nel Vuoto Spaziale.”
 
