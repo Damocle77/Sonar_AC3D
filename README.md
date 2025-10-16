@@ -1,7 +1,5 @@
 🚀 SONAR: La Trasmutazione Audio EAC3/AC3 5.1
 
-“L’audio perfetto non è solo udibile... è percepibile come un eco nel Vuoto Spaziale.”
-
 > “L’audio perfetto non è solo udibile... è percepibile come un eco nel Vuoto Spaziale.”
 
 **converti_2AC3_sonar.sh** è uno script Bash avanzato per la conversione di tracce audio **Atmos, EAC3, DTS** in **AC3 5.1 a 640kbps**, con filtri psicoacustici dinamici che simulano il suono spaziale 3D (Upfiring) ottimizzati per impianti AVR Classici (Ottimizzato su **Kenwood RV-6000 + KC-1 300HT + SW-40HT)**.  
@@ -79,12 +77,18 @@ La versione **v5.4** garantisce uniformità spaziale e compensazione dinamica ch
 
 ## 🧠 Note Tecniche
 
-- L’algoritmo SONAR combina `aecho`, `adelay` e `equalizer` per manipolare tempo e fase sui canali surround.  
-- LFE e voce sono bilanciati per evitare saturazione (`alimiter=0.92`) e mantenere dialoghi chiari anche nei picchi dei master ad alta dinamica.  
+L’algoritmo SONAR combina aecho, adelay e equalizer per manipolare tempo e fase sui canali surround.
+LFE e voce sono bilanciati per evitare saturazione (alimiter=0.92) e mantenere dialoghi chiari anche nei picchi dei master ad alta dinamica.
+Implementa compensazione psicoacustica sui canali laterali per migliorare la percezione spaziale dei suoni di effetto.
+Applicazione di ritardi asimmetrici tra i canali surround per simulare riflessi naturali e profondità verticale.
+Filtri vocali ottimizzati per preservare l'intelligibilità dei dialoghi anche con effetti sonori molto dinamici.
+Supporto a tutti i bitrate AC3 standard fino a 768k senza perdita di uniformità sonora.
+Gestione automatica della loudness globale per evitare squilibri tra tracce diverse nello stesso progetto.
 
 ---
 
-## 📜 Licenza
+> “Se puoi sentirlo davvero, complimenti: hai appena sbloccato il livello segreto del surround. Che la forza del bit sia con te, giovane Jedi dell'audio.”
 
+## 📜 Licenza
 MIT License
 
