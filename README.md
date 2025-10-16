@@ -82,7 +82,7 @@ LFE e voce sono bilanciati per evitare saturazione (alimiter=0.92) e mantenere d
 Implementa compensazione psicoacustica sui canali laterali per migliorare la percezione spaziale dei suoni di effetto.
 Applicazione di ritardi asimmetrici tra i canali surround per simulare riflessi naturali e profondità verticale.
 Filtri vocali ottimizzati per preservare l'intelligibilità dei dialoghi anche con effetti sonori molto dinamici.
-Supporto a tutti i bitrate AC3 standard fino a 768k senza perdita di uniformità sonora.
+Supporto a tutti i bitrate EAC3/AC3/DTS standard fino a 768k senza perdita di uniformità sonora.
 Gestione automatica della loudness globale per evitare squilibri tra tracce diverse nello stesso progetto.
 
 ---
