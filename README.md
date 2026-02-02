@@ -10,8 +10,7 @@ Suite di script **FFmpeg-based** per l’elaborazione **offline** di tracce audi
 Pensata per AVR usati in modalità **Straight / Pure / Direct** (testata e ottimizzata su **Yamaha RX-V4A con crossover 160Hz**) e compatibile con sistemi di correzione ambientale come **YPAO**.
 
 > “Non tutti i supereroi indossano un mantello… a volte basta un `-filter_complex` per salvare il mondo del 5.1.”  
-> ⚡ Sandro (D@mocle77) Sabbioni ⚡  
-> …perception follows physics…
+> ⚡ Sandro (D@mocle77) Sabbioni …perception follows physics ⚡
 
 ---
 
@@ -212,8 +211,6 @@ Ottimizza tracce **stereo** per ascolto ravvicinato VR/ASMR/intimo.
 ## 🎨 EQ Voce Sartoriale (Canale Centrale — FC)
 
 L’EQ Voce è **sempre attiva** in tutti gli script (5.1 processing, stereo upmix).
-
-### Versione ottimizzata (2026)
 ```
 −1.0 dB @ 230 Hz   → alleggerimento del corpo vocale
 −1.0 dB @ 350 Hz   → riduzione "boxiness"
