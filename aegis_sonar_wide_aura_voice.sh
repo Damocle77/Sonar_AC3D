@@ -11,7 +11,7 @@ set -euo pipefail
 # │ • Delay ridotti (50ms invece di 85ms) per stanze >4×5×4m                     │
 # │ • Mantiene video, sottotitoli e traccia originale opzionale                  │
 # │   WIDE → Film d'azione, sport, concerti, car chase, battaglie                │
-# │   AEGIS → Film moderni ben mixati, thriller, dinamica variabile              │
+# │   AEGIS → Film moderni ben mixati, thriller, boost moderato                  │
 # │   SONAR → Sci-fi, fantasy, film con molto "sky/ceiling action"               │
 # │   AURA → Drama, dialoghi, film vintage rimasterizzati                        │
 # │   VOICE → Quando l'audio 5.1 originale è perfetto                            │                                               │
@@ -53,7 +53,7 @@ PARAMETRI:
   5) mode       sonar | wide | aegis | aura | voice
                • sonar = “altezza” (illusione verticale 5.1.2)
                • wide  = “ampiezza” (illusione orizzontale 7.1)
-               • aegis = “intermedia” + controllo dinamico (cupola coerente)
+               • aegis = "intermedia" (cupola coerente, boost moderato)
                • aura  = “wide light” (spazio laterale soft, bassa energia)
                • voice = solo EQ Voce Sartoriale su FC (surround pass-through)
 
@@ -152,13 +152,13 @@ read -r -d '' SUR_FILTERS_AEGIS <<'EOF' || true
 [SLp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
 [SLh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
 [SLlate_in]adelay=50,lowpass=f=1300,volume=0.45[SLlate];
-[SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,acompressor=threshold=-16dB:ratio=1.6:attack=3:release=60:makeup=1.5,volume=1.20[SL_out];
+[SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
 [SRd_in]adelay=0,volume=0.95[SRd];
 [SRp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
 [SRh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
 [SRlate_in]adelay=50,lowpass=f=1300,volume=0.45[SRlate];
-[SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,acompressor=threshold=-16dB:ratio=1.6:attack=3:release=60:makeup=1.5,volume=1.20[SR_out];
+[SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SR_out];
 EOF
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -197,8 +197,8 @@ EOF
 # DSP – BLOCCO VOICE (solo EQ FC, surround pass-through)
 # ────────────────────────────────────────────────────────────────────────────────
 read -r -d '' SUR_FILTERS_VOICEONLY <<'EOF' || true
-[SL]anull[SL_out];
-[SR]anull[SR_out];
+[SL]volume=1.08[SL_out];
+[SR]volume=1.08[SR_out];
 EOF
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -287,7 +287,7 @@ for CUR_FILE in "${FILES[@]}"; do
     SUR_BLOCK="$SUR_FILTERS_AEGIS"
     VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
     LIMITER_OPTS="limit=0.98:attack=1.0:release=15"
-    MODE_TITLE="AEGIS (Dynamic Guard Sonar + EQ Voce)"
+    MODE_TITLE="AEGIS (Intermedia Sonar + EQ Voce)"
   elif [[ "$SUR_MODE" = "aura" ]]; then
     SUR_BLOCK="$SUR_FILTERS_AURA"
     VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AURA}"

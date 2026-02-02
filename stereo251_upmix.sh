@@ -88,7 +88,7 @@ for IN in "$@"; do
   else
     ENV_VOL=0.17; ENV_RATIO=1.38; ENV_ATTACK=220; ENV_RELEASE=780
     ENV_THR=0.16; SUR_VOL=0.70; DL=12; DR=16; APH_S=0.32; APH_D=2.3
-    SUR_TRIM_DB=0.3
+    SUR_TRIM_DB=0.6
   fi
 
   SUR_TRIM="$(db2lin "$SUR_TRIM_DB")"
@@ -128,7 +128,7 @@ for IN in "$@"; do
 [sL2]volume=${SUR_TRIM}[SL];
 [sR2]volume=${SUR_TRIM}[SR];
 
-[FL][FR][FC][LFE][SL][SR]join=inputs=6:channel_layout=5.1[aout]
+[FL][FR][FC][LFE][SL][SR]join=inputs=6:channel_layout=5.1,volume=1.10[aout]
 EOF
 )"
 
