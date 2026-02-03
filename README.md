@@ -2,8 +2,8 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
-### Psychoacoustic Surround Toolkit (FFmpeg-based)
+# 🎧 Sonar / Wide / Aegis / Aura / Voice
+### Psychoacoustic Surround Suite (FFmpeg-based)
 
 Suite di script **FFmpeg-based** per l’elaborazione **offline** di tracce audio **5.1**, progettata per migliorare **intelligibilità del parlato**, **coerenza timbrica** e **spazialità surround** senza stravolgere il mix originale.
 
