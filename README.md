@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="sonary_logo.png" width="700" alt="Sonary Suite Logo">
+  <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
 # 🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
