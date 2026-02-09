@@ -97,19 +97,19 @@ Elabora tracce **5.1 già presenti** con DSP surround psicoacustico.
 **Esempi**
 ```bash
 # Sci-fi / fantasy → SONAR (altezza)
-./aegis_sonar_wide_aura_voice.sh eac3 no "interstellar.mkv" 768k sonar
+./aegis_sonar_wide_aura_voice.sh eac3 no "blockbuster.mkv" 768k sonar
 
 # Action moderno → WIDE (ampiezza laterale)
-./aegis_sonar_wide_aura_voice.sh eac3 no "fast_furious.mkv" 768k wide
+./aegis_sonar_wide_aura_voice.sh eac3 no "action.mkv" 768k wide
 
 # Thriller / dinamica variabile → AEGIS (controllo)
-./aegis_sonar_wide_aura_voice.sh eac3 no "batman.mkv" 640k aegis
+./aegis_sonar_wide_aura_voice.sh eac3 no "cinecomic.mkv" 640k aegis
 
 # Drama / dialoghi → AURA (spazio discreto)
-./aegis_sonar_wide_aura_voice.sh ac3 si "drama.mkv" 640k aura
+./aegis_sonar_wide_aura_voice.sh ac3 si "drammedy.mkv" 640k aura
 
 # Mix piatti / surround inutili → VOICE (solo voce)
-./aegis_sonar_wide_aura_voice.sh ac3 no "vecchio_film.mkv" 640k voice
+./aegis_sonar_wide_aura_voice.sh ac3 no "vecchiofilm.mkv" 640k voice
 
 # Batch cartella con WIDE
 ./aegis_sonar_wide_aura_voice.sh eac3 no "" 768k wide
