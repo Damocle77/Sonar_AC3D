@@ -176,7 +176,7 @@ Lo script segnala condizioni dove anche un preset “giusto” potrebbe dare ris
 - **SUR RMS assoluto molto basso** (es. < ~−35 dB) → i surround sono quasi “muti” nel mix: anche SONAR/WIDE potrebbero risultare leggeri.
 - **FC RMS molto alto** (es. > ~−20 dB) → il mix è già super voice-centric: spesso bastano AURA/VOICE.
 
-### Tabella tecnica comparativa (v3)
+### Tabella tecnica comparativa
 
 Nel report viene stampata anche una tabella “da laboratorio” per leggere al volo cosa fa ogni preset:
 
