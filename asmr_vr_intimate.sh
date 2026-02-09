@@ -171,9 +171,9 @@ EOF
 # whisper: 380µs asimmetrico = sussurro leggermente spostato (più naturale/intimo)
 # near: 200µs simmetrico = presenza frontale bilanciata
 # center: 0µs = perfettamente centrale
-ITD_WHISPER="adelay=0|380"
-ITD_NEAR="adelay=100|100"
-ITD_CENTER="adelay=0|0"
+ITD_WHISPER="adelay=0|0.38"
+ITD_NEAR="adelay=0|0.20"
+ITD_CENTER="adelay=0|0.00"
 
 # ── Pseudo-LFO "breathing" (effetto ipnotico intimo) ─────────────────────────
 # Chorus più delicato + modulazione pan lenta per simulare respiro ravvicinato
@@ -245,18 +245,22 @@ for IN in "$@"; do
     -hide_banner
     -fflags +genpts
     -i "$IN"
+    -map_metadata 0
+    -map_chapters 0
     -map 0:v?
     -map 0:"$AIDX"
     -map 0:s?
+    -map 0:t?
     -c:v copy
     -c:s copy
-    -af "$FILTER"
-    -c:a aac -b:a 256k -ac 2
+    -c:t copy
+    -filter:a:0 "$FILTER"
+    -c:a:0 aac -b:a:0 256k -ac:a:0 2 -ar:a:0 48000
   )
 
   if [[ "$KEEP_ORIG" -eq 1 ]]; then
     cmd+=(
-      -map 0:"$AIDX"?          # seconda traccia = originale
+      -map 0:"$AIDX"           # seconda traccia = originale
       -c:a:1 copy
       -metadata:s:a:1 title="Original Stereo (unedited)"
       -disposition:a:1 0

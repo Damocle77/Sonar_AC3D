@@ -1,16 +1,17 @@
 <p align="left">
-  <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
+  <img src="sonary_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonar / Wide / Aegis / Aura / Voice
-### Psychoacoustic Surround Suite (FFmpeg-based)
+# 🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
+### Psychoacoustic Surround Toolkit (FFmpeg-based)
 
 Suite di script **FFmpeg-based** per l’elaborazione **offline** di tracce audio **5.1**, progettata per migliorare **intelligibilità del parlato**, **coerenza timbrica** e **spazialità surround** senza stravolgere il mix originale.
 
 Pensata per AVR usati in modalità **Straight / Pure / Direct** (testata e ottimizzata su **Yamaha RX-V4A con crossover 160Hz**) e compatibile con sistemi di correzione ambientale come **YPAO**.
 
 > “Non tutti i supereroi indossano un mantello… a volte basta un `-filter_complex` per salvare il mondo del 5.1.”  
-> ⚡ Sandro (D@mocle77) Sabbioni | perception follows physics ⚡
+> ⚡ Sandro (D@mocle77) Sabbioni ⚡  
+> …perception follows physics…
 
 ---
 
@@ -96,19 +97,19 @@ Elabora tracce **5.1 già presenti** con DSP surround psicoacustico.
 **Esempi**
 ```bash
 # Sci-fi / fantasy → SONAR (altezza)
-./aegis_sonar_wide_aura_voice.sh eac3 no "fantasy.mkv" 768k sonar
+./aegis_sonar_wide_aura_voice.sh eac3 no "interstellar.mkv" 768k sonar
 
 # Action moderno → WIDE (ampiezza laterale)
-./aegis_sonar_wide_aura_voice.sh eac3 no "action.mkv" 768k wide
+./aegis_sonar_wide_aura_voice.sh eac3 no "fast_furious.mkv" 768k wide
 
 # Thriller / dinamica variabile → AEGIS (controllo)
-./aegis_sonar_wide_aura_voice.sh eac3 no "cinecomic.mkv" 640k aegis
+./aegis_sonar_wide_aura_voice.sh eac3 no "batman.mkv" 640k aegis
 
 # Drama / dialoghi → AURA (spazio discreto)
 ./aegis_sonar_wide_aura_voice.sh ac3 si "drama.mkv" 640k aura
 
 # Mix piatti / surround inutili → VOICE (solo voce)
-./aegis_sonar_wide_aura_voice.sh ac3 no "classico.mkv" 640k voice
+./aegis_sonar_wide_aura_voice.sh ac3 no "vecchio_film.mkv" 640k voice
 
 # Batch cartella con WIDE
 ./aegis_sonar_wide_aura_voice.sh eac3 no "" 768k wide
@@ -146,6 +147,61 @@ creando l’illusione di canali height.
 - Compatibile **Linux / macOS / Windows (MSYS2, Git-Bash, WSL2)**
 - Cleanup automatico file temporanei via `trap EXIT`
 - Nessuna dipendenza da Audacity
+
+### Come decide il preset (logica Δ)
+
+Lo script misura:
+
+- **FC RMS (voce)** → energia media del canale centrale
+- **SUR RMS (ambiente)** → energia media combinata dei surround (SL/SR)
+- **Δ = (SUR − FC)** → quanto i surround sono “sotto” (negativo) o “sopra” (positivo) rispetto alla voce
+
+La scelta è **discriminativa** e basata su soglie stabili:
+
+```
+SOGLIE DECISIONALI (Δ = SUR − FC)
+  • Δ < -10 dB      → SONAR  (surround inesistenti)
+  • -10 ≤ Δ < -5 dB → WIDE   (surround molto deboli)
+  • -5  ≤ Δ < -2 dB → AEGIS  (surround deboli)
+  • -2  ≤ Δ <  2 dB → AURA   (surround bilanciati) ★
+  • Δ ≥  2 dB       → VOICE  (surround forti)
+```
+
+★ **Borderline**: vengono mostrate **alternative** solo se Δ è entro **±0.5 dB** da una soglia (per non “consigliare a caso”).
+
+### Warning intelligenti (casi estremi)
+
+Lo script segnala condizioni dove anche un preset “giusto” potrebbe dare risultati sottili o dove è meglio non esagerare:
+
+- **SUR RMS assoluto molto basso** (es. < ~−35 dB) → i surround sono quasi “muti” nel mix: anche SONAR/WIDE potrebbero risultare leggeri.
+- **FC RMS molto alto** (es. > ~−20 dB) → il mix è già super voice-centric: spesso bastano AURA/VOICE.
+
+### Tabella tecnica comparativa (v3)
+
+Nel report viene stampata anche una tabella “da laboratorio” per leggere al volo cosa fa ogni preset:
+
+```
+┌─────────┬────────┬───────────┬───────────────┬────────────────┐
+│ Preset  │ Layer  │ Delay Max │ Banda Freq    │ Energia Totale │
+├─────────┼────────┼───────────┼───────────────┼────────────────┤
+│ VOICE   │   0    │    0ms    │ Full spectrum │     1.08x      │
+│ AURA    │   2    │    9ms    │  800-4500 Hz  │     1.37x      │
+│ WIDE    │   3    │   24ms    │  280-7000 Hz  │     1.97x      │
+│ AEGIS   │   4    │   50ms    │ 1500-14000 Hz │     2.18x      │
+│ SONAR   │   4    │   50ms    │ 1500-14000 Hz │     3.69x      │
+└─────────┴────────┴───────────┴───────────────┴────────────────┘
+```
+
+### Cosa aspettarsi dai preset (riassunto tecnico)
+
+| Preset | Layer | Delay Max | Banda frequenze | Decorrelazione | Quando brilla |
+|---|---:|---:|---|---|---|
+| **VOICE** | 0 | 0ms | Full | nessuna (surround passthrough) | mix già ottimi, vuoi solo più intelligibilità |
+| **AURA** | 2 | ~9ms | 800–4500 Hz | 1 allpass/layer (soft) | drama, dialoghi, “spazio” discreto |
+| **WIDE** | 3 | ~24ms | 280–7000 Hz | 1–2 allpass/layer | action, sport, concerti, ampiezza laterale |
+| **AEGIS** | 4 | ~50ms | 1500–14000 Hz | 2 allpass/layer | thriller, mix moderni, cupola controllata |
+| **SONAR** | 4 | ~50ms | 1500–14000 Hz | 2 allpass/layer | sci‑fi/fantasy, surround carenti, “altezza” psicoacustica |
+
 
 👉 **Workflow consigliato**
 ```text
@@ -211,6 +267,8 @@ Ottimizza tracce **stereo** per ascolto ravvicinato VR/ASMR/intimo.
 ## 🎨 EQ Voce Sartoriale (Canale Centrale — FC)
 
 L’EQ Voce è **sempre attiva** in tutti gli script (5.1 processing, stereo upmix).
+
+### Versione ottimizzata (2026)
 ```
 −1.0 dB @ 230 Hz   → alleggerimento del corpo vocale
 −1.0 dB @ 350 Hz   → riduzione "boxiness"
@@ -232,6 +290,9 @@ L’EQ Voce è **sempre attiva** in tutti gli script (5.1 processing, stereo upm
 ---
 
 ## 🧬 Modalità Surround — Architettura e cosa aspettarsi
+
+> Nota: i dettagli tecnici (layer, delay max, banda e decorrelazione) sono gli stessi riportati dal **Preset Advisor v3** nella tabella comparativa.
+
 
 ### 1️⃣ WIDE — Widening (illusione 7.1)
 **Quando usarla**: action, sport, inseguimenti  
@@ -277,6 +338,27 @@ L’EQ Voce è **sempre attiva** in tutti gli script (5.1 processing, stereo upm
 <p align="left">
   <img src="guida_voice_schema.png" width="700" alt="Schema decisionale RMS">
 </p>
+
+### Schema consigliato (Δ-based, coerente con Preset Advisor)
+
+1) Misura RMS di **FC** e dei **Surround** (SL/SR), poi calcola:
+
+```
+Δ = (SUR RMS) − (FC RMS)
+```
+
+2) Applica le soglie:
+
+```
+Δ < -10 dB      → SONAR
+-10 .. -5 dB    → WIDE
+-5  .. -2 dB    → AEGIS
+-2  ..  2 dB    → AURA
+≥ 2 dB          → VOICE
+```
+
+Nota: i range RMS assoluti sotto restano utili come “sanity check” (warning), ma la scelta del preset più stabile è la Δ.
+
 
 **Step 1: RMS Surround (SL/SR)**
 ```

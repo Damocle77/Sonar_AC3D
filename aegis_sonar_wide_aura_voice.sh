@@ -89,17 +89,41 @@ info "Surround mode:  $SUR_MODE"
 # Funzioni probe audio
 # ────────────────────────────────────────────────────────────────────────────────
 probe_audio_stream() {
-  local f="$1" line best=""
+  local f="$1" line
+
   mapfile -t _A_LINES < <(ffprobe -v error -select_streams a \
     -show_entries stream=index,channels,channel_layout:stream_disposition=default:stream_tags=language \
     -of csv=p=0 "$f" 2>/dev/null || true)
-  [[ ${#_A_LINES[@]} -eq 0 ]] && return 1
+
+  [[ ${#_A_LINES[@]} -gt 0 ]] || return 1
+
+  # Scoring:
+  #  +1000 6ch (5.1)
+  #  +200  default
+  #  +300  language it*
+  #  +10   layout known (non vuoto/non unknown)
+  local best_line="" best_score=-1
   for line in "${_A_LINES[@]}"; do
     IFS=',' read -r idx ch layout def lang <<<"$line"
-    [[ "$def" = "1" ]] && { best="$line"; break; }
-    [[ -z "$best" ]] && best="$line"
+    ch="${ch:-0}"
+    def="${def:-0}"
+    lang="${lang:-}"
+    layout="${layout:-}"
+
+    local score=0
+    [[ "$ch" -eq 6 ]] && score=$((score+1000))
+    [[ "$def" == "1" ]] && score=$((score+200))
+    [[ "${lang,,}" =~ ^it ]] && score=$((score+300))
+    [[ -n "$layout" && "${layout,,}" != "unknown" ]] && score=$((score+10))
+
+    if (( score > best_score )); then
+      best_score=$score
+      best_line="$line"
+    fi
   done
-  IFS=',' read -r A_STREAM_INDEX A_CHANNELS A_LAYOUT A_IS_DEFAULT A_LANG <<<"$best"
+
+  [[ -n "$best_line" ]] || return 1
+  IFS=',' read -r A_STREAM_INDEX A_CHANNELS A_LAYOUT A_IS_DEFAULT A_LANG <<<"$best_line"
   A_LANG="${A_LANG:-}"
 }
 
@@ -228,6 +252,10 @@ read -r -d '' VOICE_DELTA_AURA <<'EOF' || true
 volume=0.56dB,equalizer=f=2500:t=q:w=1.2:g=0.15[FCv];
 EOF
 
+read -r -d '' VOICE_DELTA_AEGIS <<'EOF' || true
+volume=0.57dB,equalizer=f=2500:t=q:w=1.2:g=0.20[FCv];
+EOF
+
 read -r -d '' VOICE_DELTA_VOICEONLY <<'EOF' || true
 volume=0dB[FCv];
 EOF
@@ -283,11 +311,13 @@ for CUR_FILE in "${FILES[@]}"; do
     VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
     LIMITER_OPTS="limit=0.97:attack=1.5:release=25"
     MODE_TITLE="Sonar (EQ Voce + DSP Surround)"
+
   elif [[ "$SUR_MODE" = "aegis" ]]; then
     SUR_BLOCK="$SUR_FILTERS_AEGIS"
-    VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
+    VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AEGIS}"
     LIMITER_OPTS="limit=0.98:attack=1.0:release=15"
     MODE_TITLE="AEGIS (Intermedia Sonar + EQ Voce)"
+
   elif [[ "$SUR_MODE" = "aura" ]]; then
     SUR_BLOCK="$SUR_FILTERS_AURA"
     VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AURA}"
@@ -306,7 +336,7 @@ for CUR_FILE in "${FILES[@]}"; do
   fi
 
   FILTER_COMPLEX="
-[0:${A_STREAM_INDEX}]aformat=sample_rates=48000:sample_fmts=fltp,
+[0:${A_STREAM_INDEX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},
 pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L_CH}|SR=${SUR_R_CH}[base];
 [base]channelsplit=channel_layout=5.1(side)[FL][FR][FC][LFE][SL][SR];
 ${VOICE_BLOCK}
@@ -327,6 +357,7 @@ alimiter=${LIMITER_OPTS}:asc=1:level=1[aout]
        -map_chapters 0
        -filter_complex "$FILTER_COMPLEX"
        -map 0:v -c:v copy
+       -map 0:t? -c:t copy
        -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -ar:a:0 48000 -ac:a:0 6
        -metadata:s:a:0 title="${OUT_CODEC^^} 5.1 – ${MODE_TITLE}"
        -disposition:a:0 default)
