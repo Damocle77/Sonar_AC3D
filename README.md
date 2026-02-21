@@ -55,7 +55,6 @@ cd Sonary_Suite
 chmod +x aegis_sonar_wide_aura_voice.sh
 chmod +x stereo251_upmix.sh
 chmod +x asmr_vr_intimate.sh
-chmod +x surround_preset_advisor.sh
 ```
 
 ---
@@ -67,7 +66,7 @@ chmod +x surround_preset_advisor.sh
 | **VOICE** | Solo EQ Voce Sartoriale sul canale centrale | ~1.08× |
 | **AURA** | Wide Light – spazio laterale soft | ~1.37× |
 | **WIDE** | Ampiezza orizzontale (illusione 7.1) | ~1.97× |
-| **AEGIS** | Cupola bilanciata con controllo dinamico | ~2.18× |
+| **AEGIS** | Cupola bilanciata (Neural-X) | ~2.18× |
 | **SONAR** | Altezza psicoacustica (illusione 5.1.2) | ~3.69× |
 
 ---
@@ -114,49 +113,6 @@ Elabora tracce **5.1 già presenti** con DSP surround psicoacustico.
 # Batch cartella con WIDE
 ./aegis_sonar_wide_aura_voice.sh eac3 no "" 768k wide
 ```
-
----
-
-### 2️⃣ `surround_preset_advisor.sh` — Preset Advisor automatico (RMS-based)
-Analizza una traccia **5.1 esistente** e suggerisce il preset più coerente
-(Sonar / Wide / Aegis / Aura / Voice) **in base all’energia reale del mix**.
-
-È l’alternativa automatica all’analisi manuale in Audacity.
-
-**Utilizzo**
-```bash
-./surround_preset_advisor.sh "film.mkv"
-```
-
-**Output tipico**
-```
-FC RMS (voce)     : -21.3 dB
-SUR RMS (ambiente): -34.1 dB
-Δ (SUR - FC)      : -12.8 dB
-
-PRESET CONSIGLIATO: SONAR
-Motivazione:
-I surround sono quasi inesistenti.
-SONAR ricostruisce lo spazio con forte energia psicoacustica verticale,
-creando l’illusione di canali height.
-```
-
-**Caratteristiche**
-- Estrazione reale canali con `channelsplit`
-- Analisi RMS via `astats` (fallback automatico `volumedetect`)
-- Compatibile **Linux / macOS / Windows (MSYS2, Git-Bash, WSL2)**
-- Cleanup automatico file temporanei via `trap EXIT`
-- Nessuna dipendenza da Audacity
-
-👉 **Workflow consigliato**
-```text
-surround_preset_advisor.sh
-        ↓
-preset suggerito (con motivazione)
-        ↓
-aegis_sonar_wide_aura_voice.sh
-```
-
 ---
 
 ### 3️⃣ `stereo251_upmix.sh` — Upmix Stereo → 5.1
@@ -281,34 +237,8 @@ L’EQ Voce è **sempre attiva** in tutti gli script (5.1 processing, stereo upm
   <img src="guida_voice_schema.png" width="700" alt="Schema decisionale RMS">
 </p>
 
-**Step 1: RMS Surround (SL/SR)**
-```
-≥ −25 dB          → Presenti        → WIDE
-−24 .. −27 dB     → Medi            → AURA / SONAR
-−27 .. −31 dB     → Discreti        → SONAR / AEGIS
-−31 .. −39 dB     → Molto deboli    → AEGIS o VOICE
-≤ −39 dB          → Quasi assenti   → VOICE
-```
-
-**Step 2: RMS FC (Centrale)**
-```
-> −20 dB          → Voce molto forte → OK
-−21 .. −24 dB     → Voce buona       → OK
-−25 .. −28 dB     → Voce medio-bassa → DOWNGRADE: WIDE→AEGIS, SONAR→AEGIS
-≤ −29 dB          → Voce debole      → AEGIS o VOICE (+ boost FC se serve)
-```
-
-**Regola d’oro**: se FC è basso, **downgrade** il profilo surround.
-
 ---
 
-## 🪟 Windows / MSYS2
-
-- Lo script advisor converte path POSIX → Windows quando serve
-- Usa `ffmpeg` e `ffprobe` della **stessa build**
-- `/tmp` viene gestito con cleanup via `trap EXIT`
-
----
 
 ## 🛋️ Layout consigliato della stanza
 
