@@ -71,7 +71,7 @@ chmod +x asmr_vr_intimate.sh
 
 ---
 
-## 📦 Suite completa – 4 script
+## 📦 Suite completa
 
 ### 1️⃣ `aegis_sonar_wide_aura_voice.sh` — Processing 5.1 esistente
 Elabora tracce **5.1 già presenti** con DSP surround psicoacustico.
@@ -303,3 +303,4 @@ MIT License - vedi file LICENSE
 **Sandro (D@mocle77) Sabbioni**
 
 > *Per riportare ordine nella Forza Sonora serve solo uno script Bash… questa è la via.*
+
