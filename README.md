@@ -1,8 +1,8 @@
 <p align="left">
-  <img src="sonary_logo.png" width="700" alt="Sonary Suite Logo">
+  <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
+# 🎧 Sonary Suite - Sonar / Wide / Aegis / Aura / Voice
 ### Psychoacoustic Surround Toolkit (FFmpeg-based)
 
 Suite di script **FFmpeg-based** per l’elaborazione **offline** di tracce audio **5.1**, progettata per migliorare **intelligibilità del parlato**, **coerenza timbrica** e **spazialità surround** senza stravolgere il mix originale.
@@ -90,23 +90,23 @@ Elabora tracce **5.1 già presenti** con DSP surround psicoacustico.
 - **mode**:
   - `sonar` = altezza (simulazione psicoacustica 5.1.2 verticale)
   - `wide`  = ampiezza (simulazione psicoacustica 7.1 orizzontale)
-  - `aegis` = intermedia (guardia dinamica + cupola controllata)
-  - `aura`  = **Wide Light** (spazio laterale “soft”)
-  - `voice` = **solo EQ Voce Sartoriale su FC** (surround pass-through)
+  - `aegis` = intermedia (simulazione cupola Neural-X verticale)
+  - `aura`  = ampiezza (simulazione psicoacustica 6.1 posteriore)
+  - `voice` = **solo EQ Voce Sartoriale FC** (surround pass-through)
 
 **Esempi**
 ```bash
 # Sci-fi / fantasy → SONAR (altezza)
-./aegis_sonar_wide_aura_voice.sh eac3 no "interstellar.mkv" 768k sonar
+./aegis_sonar_wide_aura_voice.sh eac3 no "blockbuster.mkv" 768k sonar
 
 # Action moderno → WIDE (ampiezza laterale)
-./aegis_sonar_wide_aura_voice.sh eac3 no "fast_furious.mkv" 768k wide
+./aegis_sonar_wide_aura_voice.sh eac3 no "action.mkv" 768k wide
 
 # Thriller / dinamica variabile → AEGIS (controllo)
-./aegis_sonar_wide_aura_voice.sh eac3 no "batman.mkv" 640k aegis
+./aegis_sonar_wide_aura_voice.sh eac3 no "cinecomic.mkv" 640k aegis
 
 # Drama / dialoghi → AURA (spazio discreto)
-./aegis_sonar_wide_aura_voice.sh ac3 si "drama.mkv" 640k aura
+./aegis_sonar_wide_aura_voice.sh ac3 si "drammedy.mkv" 640k aura
 
 # Mix piatti / surround inutili → VOICE (solo voce)
 ./aegis_sonar_wide_aura_voice.sh ac3 no "vecchio_film.mkv" 640k voice
