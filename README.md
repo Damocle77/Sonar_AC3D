@@ -1,5 +1,5 @@
 <p align="center">
-<img src="sonary_logo.png" width="700" alt="Sonary Suite Logo">
+<img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
 🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
@@ -158,5 +158,6 @@ Crossover: Configura il taglio sul tuo sinto (es. 80Hz o 120Hz). Lo script manda
 ❌ Non sostituiscono la calibrazione ambientale del tuo microfono (YPAO, Audyssey, Dirac).
 
 “Scegli la pillola rossa, resti nel Paese delle Meraviglie... o scegli la Sonary Suite e ti mostro come suona davvero il tuo impianto.”
+
 
 ...questa è la via. 🥃💻
