@@ -2,9 +2,7 @@
 <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
-
-Psychoacoustic Surround Toolkit (FFmpeg-based)
+🎧 Psichoacustic Suite — Sonar / Wide / Aegis / Aura / Voice
 
 Suite di script FFmpeg-based per l’elaborazione offline di tracce audio multicanale e stereo. Progettata per risolvere i disastri dei mix moderni (dialoghi incomprensibili, dinamica fuori controllo, surround muti) migliorando l'intelligibilità del parlato, la coerenza timbrica e la spazialità surround senza stravolgere il master originale.
 
@@ -161,3 +159,4 @@ Crossover: Configura il taglio sul tuo sinto (es. 80Hz o 120Hz). Lo script manda
 
 
 ...questa è la via. 🥃💻
+
