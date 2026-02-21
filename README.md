@@ -1,454 +1,162 @@
-<p align="left">
-  <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
+<p align="center">
+<img src="sonary_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
-### Psychoacoustic Surround Toolkit (FFmpeg-based)
+🎧 Sonary Suite — Sonar / Wide / Aegis / Aura / Voice
 
-Suite di script **FFmpeg-based** per l’elaborazione **offline** di tracce audio **5.1**, progettata per migliorare **intelligibilità del parlato**, **coerenza timbrica** e **spazialità surround** senza stravolgere il mix originale.
+Psychoacoustic Surround Toolkit (FFmpeg-based)
 
-Pensata per AVR usati in modalità **Straight / Pure / Direct** (testata e ottimizzata su **Yamaha RX-V4A con crossover 160Hz**) e compatibile con sistemi di correzione ambientale come **YPAO**.
+Suite di script FFmpeg-based per l’elaborazione offline di tracce audio multicanale e stereo. Progettata per risolvere i disastri dei mix moderni (dialoghi incomprensibili, dinamica fuori controllo, surround muti) migliorando l'intelligibilità del parlato, la coerenza timbrica e la spazialità surround senza stravolgere il master originale.
 
-> “Non tutti i supereroi indossano un mantello… a volte basta un `-filter_complex` per salvare il mondo del 5.1.”  
-> ⚡ Sandro (D@mocle77) Sabbioni ⚡  
-> …perception follows physics…
+Pensata per Sintoamplificatori (AVR) usati in modalità Straight / Pure / Direct (testata e ottimizzata su Yamaha RX-V4A).
 
----
+“Non tutti i supereroi indossano un mantello… a volte basta un -filter_complex per salvare il mondo del 5.1.”
 
-## 🧠 Filosofia del progetto
+⚡ Sandro (D@mocle77) Sabbioni ⚡
 
-Sonary Suite nasce da un principio semplice ma rigoroso:
+…perception follows physics…
 
-> *correggere solo ciò che serve, dove serve, e nel modo meno invasivo possibile.*
+🧠 Filosofia del progetto e "Full Range"
 
-Per questo motivo:
-- l’elaborazione è **offline** (nessun DSP in tempo reale sull’AVR)
-- **FL / FR restano neutri**
-- il canale **Centrale (FC)** riceve una EQ dedicata e costante
-- i **Surround** sono l’unico elemento variabile (Sonar / Wide / Aegis / Aura oppure bypass in Voice)
-- il sistema **non applica preset “a sensazione”**: misura e poi decide
+I mix per il cinema sono pensati per sale enormi con diffusori giganteschi. Quando questi mix vengono convertiti per il mercato domestico, il risultato è spesso un pasticcio: esplosioni che fanno tremare i muri e dialoghi sussurrati.
 
-Risultato: un suono più leggibile, stabile e naturale, che **non combatte** né YPAO né il mix originale.
+La Sonary Suite nasce da un principio rigoroso: correggere solo ciò che serve, dove serve, e nel modo meno invasivo possibile.
 
----
+Elaborazione Offline Bit-Perfect: Nessun DSP in tempo reale sul tuo sintoamplificatore che introduce latenza o distorsioni. Il lavoro pesante viene fatto da FFmpeg a monte.
 
-## ✅ Requisiti
+Rispetto dei Frontali (FL/FR): I canali anteriori sinistro e destro restano rigorosamente neutri (pass-through totale). Se il tuo setup stereo suona bene, continuerà a suonare bene.
 
-### Software
-- **FFmpeg 7+** (consigliato con resampler **SOXR**)
-- **Bash 4.x+**
+Architettura Full Range: Abbiamo rimosso i vecchi filtri passa-alto (160Hz). Lo script ora lascia passare l'intero spettro sonoro (20Hz-20kHz) su tutti i canali. Il Bass Management (Crossover) è delegato interamente al tuo AVR.
 
-### Sistemi operativi
-- Linux
-- macOS
-- Windows (**WSL2**, **Git-Bash**, **MSYS2**)
+Chirurgia sul Centrale (FC): Il cuore del sistema è il controllo del Canale Centrale, che viene protetto e ottimizzato solo quando i surround diventano troppo invadenti.
 
-> Nota “fisica non negoziabile”: **AC3 / E-AC3 si codificano sempre via CPU**. L’eventuale HW accel riguarda al massimo la *decodifica video*, non l’encoding audio.
+🎛️ I Preset Psicoacustici (5.1 Core)
 
----
+I preset non si scelgono "a sensazione". Ogni modalità è una catena di filtri (compand, adelay, equalizer) progettata per emulare il comportamento dei costosi DSP commerciali:
 
-## 🚀 Installazione
+Preset
 
-```bash
-git clone https://github.com/Damocle77/Sonary_Suite.git
-cd Sonary_Suite
-chmod +x aegis_sonar_wide_aura_voice.sh
-chmod +x stereo251_upmix.sh
-chmod +x asmr_vr_intimate.sh
-chmod +x surround_preset_advisor.sh
-```
+Target Commerciale
 
----
+Quando usarlo
 
-## 🎧 Preset disponibili
+Cosa fa sotto il cofano
 
-| Preset | Filosofia | Energia effettiva (indicativa) |
-|-------|-----------|-------------------------------|
-| **VOICE** | Solo EQ Voce Sartoriale sul canale centrale | ~1.08× |
-| **AURA** | Wide Light – spazio laterale soft | ~1.37× |
-| **WIDE** | Ampiezza orizzontale (illusione 7.1) | ~1.97× |
-| **AEGIS** | Cupola bilanciata con controllo dinamico | ~2.18× |
-| **SONAR** | Altezza psicoacustica (illusione 5.1.2) | ~3.69× |
+AURA
 
----
+EXTEND 6.1 LIKE
 
-## 📦 Suite completa – 4 script
+Surround morti o assenti. Tipico di vecchi rip o streaming ultra-compressi.
 
-### 1️⃣ `aegis_sonar_wide_aura_voice.sh` — Processing 5.1 esistente
-Elabora tracce **5.1 già presenti** con DSP surround psicoacustico.
+Estrae l'ambienza dai canali frontali sfruttando l'Effetto Haas (micro-ritardi) e la spalma sui posteriori per rianimare la stanza (Matrix Mix).
 
-**Utilizzo**
-```bash
-./aegis_sonar_wide_aura_voice.sh <ac3|eac3> <si|no> [file|""] [bitrate] [sonar|wide|aegis|aura|voice]
-```
+SONAR
 
-**Parametri**
-- **codec**: `ac3` | `eac3`
-- **keep_orig**: `si` | `no` (mantiene o no anche la traccia originale)
-- **file**: `"film.mkv"` | `""` (batch: elabora tutti i file nella cartella)
-- **bitrate**: es. `448k`, `640k`, `768k` (default tipici: `ac3=640k`, `eac3=768k`)
-- **mode**:
-  - `sonar` = altezza (simulazione psicoacustica 5.1.2 verticale)
-  - `wide`  = ampiezza (simulazione psicoacustica 7.1 orizzontale)
-  - `aegis` = intermedia (guardia dinamica + cupola controllata)
-  - `aura`  = **Wide Light** (spazio laterale “soft”)
-  - `voice` = **solo EQ Voce Sartoriale su FC** (surround pass-through)
+Simula ATMOS (5.1.2)
 
-**Esempi**
-```bash
-# Sci-fi / fantasy → SONAR (altezza)
-./aegis_sonar_wide_aura_voice.sh eac3 no "blockbuster.mkv" 768k sonar
+Surround timidi. Il segnale c'è ma è piatto e privo di spazialità.
 
-# Action moderno → WIDE (ampiezza laterale)
-./aegis_sonar_wide_aura_voice.sh eac3 no "action.mkv" 768k wide
+Applica un boost secco e una curva di equalizzazione sui transienti (micro-dettagli) per dare percezione di verticalità e aria.
 
-# Thriller / dinamica variabile → AEGIS (controllo)
-./aegis_sonar_wide_aura_voice.sh eac3 no "cinecomic.mkv" 640k aegis
+WIDE
 
-# Drama / dialoghi → AURA (spazio discreto)
-./aegis_sonar_wide_aura_voice.sh ac3 si "drammedy.mkv" 640k aura
-
-# Mix piatti / surround inutili → VOICE (solo voce)
-./aegis_sonar_wide_aura_voice.sh ac3 no "vecchiofilm.mkv" 640k voice
-
-# Batch cartella con WIDE
-./aegis_sonar_wide_aura_voice.sh eac3 no "" 768k wide
-```
+EXTEND 7.1 LIKE
 
----
-
-### 2️⃣ `surround_preset_advisor.sh` — Preset Advisor automatico (RMS-based)
-Analizza una traccia **5.1 esistente** e suggerisce il preset più coerente
-(Sonar / Wide / Aegis / Aura / Voice) **in base all’energia reale del mix**.
-
-È l’alternativa automatica all’analisi manuale in Audacity.
+Mix sano e bilanciato. Vuoi solo espandere la bolla sonora latistante.
 
-**Utilizzo**
-```bash
-./surround_preset_advisor.sh "film.mkv"
-```
-
-**Output tipico**
-```
-FC RMS (voce)     : -21.3 dB
-SUR RMS (ambiente): -34.1 dB
-Δ (SUR - FC)      : -12.8 dB
-
-PRESET CONSIGLIATO: SONAR
-Motivazione:
-I surround sono quasi inesistenti.
-SONAR ricostruisce lo spazio con forte energia psicoacustica verticale,
-creando l’illusione di canali height.
-```
-
-**Caratteristiche**
-- Estrazione reale canali con `channelsplit`
-- Analisi RMS via `astats` (fallback automatico `volumedetect`)
-- Compatibile **Linux / macOS / Windows (MSYS2, Git-Bash, WSL2)**
-- Cleanup automatico file temporanei via `trap EXIT`
-- Nessuna dipendenza da Audacity
+Lavora sulla fase dei canali laterali allargando il soundstage senza alterare il volume della voce. Effetto panorama chirurgico.
 
-### Come decide il preset (logica Δ)
+AEGIS
 
-Lo script misura:
-
-- **FC RMS (voce)** → energia media del canale centrale
-- **SUR RMS (ambiente)** → energia media combinata dei surround (SL/SR)
-- **Δ = (SUR − FC)** → quanto i surround sono “sotto” (negativo) o “sopra” (positivo) rispetto alla voce
-
-La scelta è **discriminativa** e basata su soglie stabili:
-
-```
-SOGLIE DECISIONALI (Δ = SUR − FC)
-  • Δ < -10 dB      → SONAR  (surround inesistenti)
-  • -10 ≤ Δ < -5 dB → WIDE   (surround molto deboli)
-  • -5  ≤ Δ < -2 dB → AEGIS  (surround deboli)
-  • -2  ≤ Δ <  2 dB → AURA   (surround bilanciati) ★
-  • Δ ≥  2 dB       → VOICE  (surround forti)
-```
+Simula NEURAL:X
 
-★ **Borderline**: vengono mostrate **alternative** solo se Δ è entro **±0.5 dB** da una soglia (per non “consigliare a caso”).
+Surround aggressivi (es. film d'azione frenetici, corse d'auto).
 
-### Warning intelligenti (casi estremi)
+Comprime dinamicamente i surround per disciplinarli ed equalizza il Centrale sui 2.5kHz-5kHz per proteggere la voce umana dal caos ambientale.
 
-Lo script segnala condizioni dove anche un preset “giusto” potrebbe dare risultati sottili o dove è meglio non esagerare:
-
-- **SUR RMS assoluto molto basso** (es. < ~−35 dB) → i surround sono quasi “muti” nel mix: anche SONAR/WIDE potrebbero risultare leggeri.
-- **FC RMS molto alto** (es. > ~−20 dB) → il mix è già super voice-centric: spesso bastano AURA/VOICE.
-
-### Tabella tecnica comparativa
-
-Nel report viene stampata anche una tabella “da laboratorio” per leggere al volo cosa fa ogni preset:
-
-```
-┌─────────┬────────┬───────────┬───────────────┬────────────────┐
-│ Preset  │ Layer  │ Delay Max │ Banda Freq    │ Energia Totale │
-├─────────┼────────┼───────────┼───────────────┼────────────────┤
-│ VOICE   │   0    │    0ms    │ Full spectrum │     1.08x      │
-│ AURA    │   2    │    9ms    │  800-4500 Hz  │     1.37x      │
-│ WIDE    │   3    │   24ms    │  280-7000 Hz  │     1.97x      │
-│ AEGIS   │   4    │   50ms    │ 1500-14000 Hz │     2.18x      │
-│ SONAR   │   4    │   50ms    │ 1500-14000 Hz │     3.69x      │
-└─────────┴────────┴───────────┴───────────────┴────────────────┘
-```
-
-### Cosa aspettarsi dai preset (riassunto tecnico)
-
-| Preset | Layer | Delay Max | Banda frequenze | Decorrelazione | Quando brilla |
-|---|---:|---:|---|---|---|
-| **VOICE** | 0 | 0ms | Full | nessuna (surround passthrough) | mix già ottimi, vuoi solo più intelligibilità |
-| **AURA** | 2 | ~9ms | 800–4500 Hz | 1 allpass/layer (soft) | drama, dialoghi, “spazio” discreto |
-| **WIDE** | 3 | ~24ms | 280–7000 Hz | 1–2 allpass/layer | action, sport, concerti, ampiezza laterale |
-| **AEGIS** | 4 | ~50ms | 1500–14000 Hz | 2 allpass/layer | thriller, mix moderni, cupola controllata |
-| **SONAR** | 4 | ~50ms | 1500–14000 Hz | 2 allpass/layer | sci‑fi/fantasy, surround carenti, “altezza” psicoacustica |
-
+VOICE
 
-👉 **Workflow consigliato**
-```text
-surround_preset_advisor.sh
-        ↓
-preset suggerito (con motivazione)
-        ↓
-aegis_sonar_wide_aura_voice.sh
-```
-
----
-
-### 3️⃣ `stereo251_upmix.sh` — Upmix Stereo → 5.1
-Converte tracce **stereo** in 5.1 con upmix psicoacustico reattivo.
+DIALOGUE PLUS
 
-**Utilizzo**
-```bash
-./stereo251_upmix.sh <pan|surround> [codec] [bitrate] file1.mkv [file2.mkv ...]
-```
+Caos totale / Nolan Style. Muro di suono che rende tutto inudibile.
 
-**Modalità**
-- **pan**: Restauro / vecchi film (spazio stabile)
-- **surround**: Film e serie moderne (spazio reattivo)
+Chirurgia d'urgenza: applica un limiter aggressivo ai surround per castrarli e sposta i dialoghi drasticamente in primo piano.
 
-**Codec**
-- **ac3**: Dolby Digital (compatibilità massima, max 640k)
-- **eac3**: Dolby Digital Plus (qualità superiore)
-
-**Esempi**
-```bash
-# Film moderno stereo → 5.1 reattivo
-./stereo251_upmix.sh surround eac3 768k "film_stereo.mkv"
+🔬 Come scegliere il preset: Analisi Manuale (La via del Sysadmin)
 
-# Vecchio film → 5.1 stabile
-./stereo251_upmix.sh pan ac3 640k "classico_1960.mkv"
+Abbiamo rimosso gli script di analisi automatica. Perché? Perché i container MKV sono pieni di metadati corrotti, fast-seek fallati e mappe dei canali sballate che ingannano il codice. L'unico modo per non farsi fregare è analizzare la forma d'onda reale.
 
-# Default (surround, eac3, 448k)
-./stereo251_upmix.sh surround "serie.mkv"
-```
+Ti serve Audacity (gratuito, open source, infallibile). La metrica da cercare è l'RMS (potenza media), non il picco.
 
----
+La Regola d'Oro
 
-### 4️⃣ `asmr_vr_intimate.sh` — Binaurale intimo / VR / ASMR / Cuffie
-Ottimizza tracce **stereo** per ascolto ravvicinato VR/ASMR/intimo.
+Calcola il Delta (differenza di volume) tra i canali Surround e il Centrale.
+Formula: Delta = [RMS Surround] - [RMS Centrale]
 
-**Utilizzo**
-```bash
-./asmr_vr_intimate.sh [opzioni] <file1> [file2 ...]
-```
+Procedura Passo-Passo:
 
-**Opzioni**
-```
--o <dir>      Cartella di output
--d <mode>     Distanza simulata: whisper|near|center (default: whisper)
--k            Mantieni traccia audio originale
--f            Forza overwrite
--l            Attiva pseudo-LFO "breathing"
--h            Help
-```
+Trascina il tuo file video/audio dentro Audacity.
 
----
+Audacity estrarrà le tracce. Nello standard SMPTE (il 99% dei casi), il Canale Centrale (FC) è la 3ª traccia.
 
-## 🎨 EQ Voce Sartoriale (Canale Centrale — FC)
+Seleziona la traccia FC, vai su Effetti > Analizza > Misura RMS e segnati il valore (es. -21.0 dB).
 
-L’EQ Voce è **sempre attiva** in tutti gli script (5.1 processing, stereo upmix).
+Trova una traccia Surround (SL o SR) (di solito la 5ª o 6ª). Misura l'RMS (es. -27.0 dB).
 
-### Versione ottimizzata (2026)
-```
-−1.0 dB @ 230 Hz   → alleggerimento del corpo vocale
-−1.0 dB @ 350 Hz   → riduzione "boxiness"
-−0.5 dB @ 900 Hz   → micro de-nasalizzazione
-+1.6 dB @ 1.0 kHz  → articolazione del parlato
-+0.4 dB @ 1.8 kHz  → "chiodo" frontale
-+1.6 dB @ 2.5 kHz  → attacco consonantico (T,K,S,F)
-+0.35 dB @ 3.2 kHz → presenza / intelligibilità
-−1.0 dB @ 7.2 kHz  → controllo sibilanti
-```
+Calcola il Delta: -27.0 - (-21.0) = -6.0 dB.
 
-### Delta per modalità (aegis_sonar_wide_aura_voice.sh)
-- **SONAR**: +0.54 dB finale
-- **WIDE**: +0.58 dB finale + ulteriore +0.25 dB a 2.5kHz
-- **AURA**: +0.56 dB finale + ulteriore +0.15 dB a 2.5kHz
-- **VOICE**: 0 dB (neutro, solo EQ base)
-- **AEGIS**: +0.54 dB finale (come SONAR)
+Il Verdetto (Mappa del Delta):
 
----
+Delta < -12 dB ➔ Usa AURA (La stanza è vuota, serve vita).
 
-## 🧬 Modalità Surround — Architettura e cosa aspettarsi
+Da -12 a -7 dB ➔ Usa SONAR (La stanza sussurra, serve boost).
 
-> Nota: i dettagli tecnici (layer, delay max, banda e decorrelazione) sono gli stessi riportati dal **Preset Advisor v3** nella tabella comparativa.
+Da -7 a -4 dB ➔ Usa WIDE (La stanza è equilibrata, serve aria).
 
+Da -4 a 0 dB ➔ Usa AEGIS (La stanza urla, serve protezione).
 
-### 1️⃣ WIDE — Widening (illusione 7.1)
-**Quando usarla**: action, sport, inseguimenti  
-**Effetto**: estensione laterale marcata, scena “più larga”
+Delta > 0 dB ➔ Usa VOICE (L'orchestra sta uccidendo i dialoghi).
 
-### 2️⃣ SONAR — Upfiring psicoacustico (illusione 5.1.2)
-**Quando usarla**: sci-fi, fantasy, contenuti con movimento verticale  
-**Effetto**: profondità e “altezza” percepita, riflessi verticali simulati
+🛠️ Moduli della Suite e Sintassi
 
-### 3️⃣ AEGIS — Guardia dinamica (cupola controllata)
-**Quando usarla**: mix affollati, thriller, dinamica imprevedibile  
-**Effetto**: surround presente ma mai invadente, controllo picchi
+1. Il Motore Principale 5.1 (aegis_sonar_wide_aura_voice_gemini.sh)
 
-### 4️⃣ AURA — Wide Light (spazio laterale soft)
-**Quando usarla**: drama, dialoghi prioritari  
-**Effetto**: spazio discreto, bassa energia, non stanca
+# Sintassi: ./script <ac3|eac3> <si|no> "File.mkv" <bitrate> <preset>
+./aegis_sonar_wide_aura_voice_gemini.sh eac3 no "Inception_1080p.mkv" 640k voice
 
-### 5️⃣ VOICE — Solo EQ FC (surround pass-through)
-**Quando usarla**: surround inutili/dannosi, serie vecchie, mix piatti  
-**Effetto**: zero processing surround, massima priorità voce
 
----
+2. Upmix Stereo ➔ 5.1 (stereo251_upmix_gemini.sh)
+Per trasformare tracce stereo o musica in 5.1 discreti.
 
-## 🧪 Workflow consigliato: misura → processa
+./stereo251_upmix_gemini.sh eac3 "Music_Video.mkv" 640k modern
 
-### Opzione A: automatica (consigliata)
-```bash
-./surround_preset_advisor.sh "episodio.mkv"
-./aegis_sonar_wide_aura_voice.sh eac3 no "episodio.mkv" 768k sonar
-```
 
-### Opzione B: manuale con Audacity
-1. Importa traccia 5.1
-2. Isola **FC** e **SL+SR**
-3. `Analyze → RMS`
-4. Calcola Δ (SUR − FC)
-5. Scegli preset coerente
+3. Binaural/VR Processor (asmr_vr_intimate_gemini.sh)
+Per tracce ASMR o VR (Applica il Crossfeed J.Meier).
 
----
+./asmr_vr_intimate_gemini.sh -d whisper "ASMR_Recording.wav"
 
-## 📊 Schema decisionale (Audacity / RMS)
+
+📐 Layout Stanza e Setup AVR
 
 <p align="left">
-  <img src="guida_voice_schema.png" width="700" alt="Schema decisionale RMS">
+<img src="https://www.google.com/search?q=https://i.ibb.co/60q80zP/Screenshot-2023-11-09-150508.png" width="700" alt="Layout stanza consigliato">
 </p>
 
-### Schema consigliato (Δ-based, coerente con Preset Advisor)
+Impostazioni AVR Consigliate:
 
-1) Misura RMS di **FC** e dei **Surround** (SL/SR), poi calcola:
+Modalità DSP: Disattivate (usa Pure Direct o Straight).
 
-```
-Δ = (SUR RMS) − (FC RMS)
-```
+Crossover: Configura il taglio sul tuo sinto (es. 80Hz o 120Hz). Lo script manda il segnale intero, sarà il tuo hardware a smistare i bassi al Subwoofer.
 
-2) Applica le soglie:
+🚫 Cosa questi script NON fanno
 
-```
-Δ < -10 dB      → SONAR
--10 .. -5 dB    → WIDE
--5  .. -2 dB    → AEGIS
--2  ..  2 dB    → AURA
-≥ 2 dB          → VOICE
-```
+❌ Non applicano reverberi finti o effetti "stadio".
 
-Nota: i range RMS assoluti sotto restano utili come “sanity check” (warning), ma la scelta del preset più stabile è la Δ.
+❌ Non castrano le basse frequenze (Full Range pass-through).
 
+❌ Non sostituiscono la calibrazione ambientale del tuo microfono (YPAO, Audyssey, Dirac).
 
-**Step 1: RMS Surround (SL/SR)**
-```
-≥ −25 dB          → Presenti        → WIDE
-−24 .. −27 dB     → Medi            → AURA / SONAR
-−27 .. −31 dB     → Discreti        → SONAR / AEGIS
-−31 .. −39 dB     → Molto deboli    → AEGIS o VOICE
-≤ −39 dB          → Quasi assenti   → VOICE
-```
+“Scegli la pillola rossa, resti nel Paese delle Meraviglie... o scegli la Sonary Suite e ti mostro come suona davvero il tuo impianto.”
 
-**Step 2: RMS FC (Centrale)**
-```
-> −20 dB          → Voce molto forte → OK
-−21 .. −24 dB     → Voce buona       → OK
-−25 .. −28 dB     → Voce medio-bassa → DOWNGRADE: WIDE→AEGIS, SONAR→AEGIS
-≤ −29 dB          → Voce debole      → AEGIS o VOICE (+ boost FC se serve)
-```
-
-**Regola d’oro**: se FC è basso, **downgrade** il profilo surround.
-
----
-
-## 🪟 Windows / MSYS2
-
-- Lo script advisor converte path POSIX → Windows quando serve
-- Usa `ffmpeg` e `ffprobe` della **stessa build**
-- `/tmp` viene gestito con cleanup via `trap EXIT`
-
----
-
-## 🛋️ Layout consigliato della stanza
-
-<p align="left">
-  <img src="sonar_room_layout.png" width="700" alt="Layout stanza consigliato">
-</p>
-
-### Posizionamento altoparlanti
-- **Front L/R**: ±30° rispetto al centro
-- **Center**: centrato sotto/sopra TV, inclinato verso il punto d’ascolto
-- **Surround L/R**: laterali o leggermente arretrati, non troppo alti
-- **Subwoofer**: “sub crawl” per trovare la posizione ottimale
-
-### Dimensioni stanza (indicative)
-- minimo: ~3×4m
-- consigliato: >4×5m con soffitto ≥2.8m
-- ideale: stanza irregolare (riduce modi di risonanza)
-
----
-
-## 🚫 Cosa questi script NON fanno
-
-- ❌ Non applicano “dialog enhancer” artificiali
-- ❌ Non comprimono aggressivamente la dinamica (solo guardia leggera in Aegis)
-- ❌ Non modificano i frontali L/R (restano neutri)
-- ❌ Non sostituiscono la calibrazione ambientale
-- ❌ Non usano neural networks o AI upscaling
-
----
-
-## 🔧 Troubleshooting
-
-### Script non parte
-```bash
-chmod +x *.sh
-ffmpeg -version
-./aegis_sonar_wide_aura_voice.sh eac3 no "test.mkv" 640k voice
-```
-
-### Audio risultante troppo forte/basso
-- controlla livelli RMS originali
-- se serve, applica normalizzazione preventiva (leggera), poi processa
-
-### Surround troppo invasivi
-- prova **AURA** invece di WIDE
-- oppure **VOICE** (surround pass-through)
-
-### Voce ancora poco intelligibile
-- verifica RMS FC
-- se FC < -28 dB: **AEGIS o VOICE** (e/o boost FC moderato)
-
----
-
-## 📄 Licenza
-
-MIT License - vedi file LICENSE
-
----
-
-## 👤 Autore
-
-**Sandro (D@mocle77) Sabbioni**
-
-> *Per riportare ordine nella Forza Sonora serve solo uno script Bash… questa è la via.*
+...questa è la via. 🥃💻
