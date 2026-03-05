@@ -2,7 +2,7 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonary Suite - Psychoacoustic Toolkit (FFmpeg-based)
+# 🎧 Sonary Suite - Psychoacoustic Toolkit (FFmpeg+Awk)
 Suite di script **FFmpeg-based** per lavorare **offline** sull’audio (stereo e 5.1) con un obiettivo molto poco romantico e molto utile: **capire cosa c’è nel mix, misurarlo, e correggere solo dove serve**.
 
 Pensata per AVR usati in modalità **Straight / Pure / Direct** (testata e ottimizzata su **Yamaha RX‑V4A con crossover 160 Hz**) e compatibile con correzione ambientale tipo **YPAO**.
@@ -67,10 +67,10 @@ chmod +x *.sh
 
 | Preset | Filosofia | Energia effettiva (indicativa) |
 |-------|-----------|-------------------------------|
-| **VOICE** | Tailoring vFC (surround pass‑through) | ~1.08× |
+| **VOICE** | Tailoring FC (surround pass‑through) | ~1.08× |
 | **AURA** | Wide light sound (illusione 6.1) | ~1.37× |
 | **WIDE** | Ampiezza orizzontale (illusione 7.1) | ~1.97× |
-| **AEGIS** | Cupola controllata (Neural‑X like) | ~2.18× |
+| **AEGIS** | Cupola sonora (illusione Neural‑X) | ~2.18× |
 | **SONAR** | Altezza psicoacustica (illusione 5.1.2) | ~3.69× |
 
 ---
@@ -315,3 +315,4 @@ MIT License — vedi `LICENSE`
 **Sandro (D@mocle77) Sabbioni**
 
 > *Per riportare ordine nella Forza Sonora serve solo uno script Bash… questa è la via.*
+
