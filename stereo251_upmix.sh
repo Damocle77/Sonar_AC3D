@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
-set -euo pipefail
+# set -e rimosso: causa exit imprevedibili su pattern && / || e aritmetica bash.
+set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   stereo251_gemini_pro.sh — UPMIX FIXED & SMART                              │
-# │   • Fix: Join 5.1(side) per evitare errore SL                                │
-# │   • Smart Args: Rileva se passi subito il file o la modalità                 │
-# │   • Full Range + EQ Sartoriale V2                                            │
+# │   stereo251_upmix.sh - V2 - Febbraio 2026                                   │
+# │                                                                              │
+# │   Motore di upmix offline da Stereo a 5.1 (eAC3/AC3).                       │
+# │   Estrae il canale centrale (Dialoghi) e simula un'ambienza surround         │
+# │   basata su mid/side processing e decorrelazione (Effetto Haas).             │
+# │                                                                              │
+# │   CHANGELOG V2:                                                              │
+# │     - Rimosso set -e (allineato a aegis/analyzer)                            │
+# │     - Selezione stream score-based (2ch, default, ita)                       │
+# │     - asplit=3 invece di 6 (meno RAM/CPU)                                    │
+# │     - Crossover FC/LFE: FC highpass 80Hz, LFE lowpass 120Hz + volume -6dB   │
+# │     - Surround volume ridotto (0.85 modern, 0.70 vintage)                    │
+# │     - Limiter level=0 (no auto-leveling, allineato al processore 5.1)       │
+# │     - -y condizionale (solo su sovrascrittura confermata)                    │
+# │     - Prompt overwrite da /dev/tty + opzione "tutti"                         │
+# │     - Glob estesi + formati uppercase                                        │
 # ╰──────────────────────────────────────────────────────────────────────────────╯
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Colori terminale
-# ────────────────────────────────────────────────────────────────────────────────
 C_INFO="\033[0;36m[INFO]\033[0m"
 C_WARN="\033[0;33m[WARNING]\033[0m"
 C_ERR="\033[0;31m[ERROR]\033[0m"
@@ -21,124 +31,234 @@ warn(){ echo -e "${C_WARN} $*"; }
 err(){  echo -e "${C_ERR}  $*"; }
 ok(){   echo -e "${C_OK}  $*"; }
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Gestione Argomenti Intelligente
-# ────────────────────────────────────────────────────────────────────────────────
-# Default
-OUT_CODEC="eac3"
-BITRATE="320k"
-MODE="modern"
-INPUT_FILE=""
+for _bin in ffmpeg ffprobe; do
+  command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
+done
 
-# Helper per capire cosa l'utente sta passando
-if [[ $# -gt 0 ]]; then
-    # Se il primo argomento è un file esistente, assumiamo uso rapido
-    if [[ -f "$1" ]]; then
-        INPUT_FILE="$1"
-        info "Rilevato file in ingresso diretto. Uso default: $OUT_CODEC $BITRATE $MODE"
-    
-    # Se il primo argomento è "vintage" o "modern", assumiamo uso con preset
-    elif [[ "$1" == "vintage" || "$1" == "modern" ]]; then
-        MODE="$1"
-        if [[ -n "${2:-}" && -f "$2" ]]; then
-            INPUT_FILE="$2"
-        fi
-        info "Rilevata modalità '$MODE'. Uso default: $OUT_CODEC $BITRATE"
+usage() {
+  cat <<'USAGE'
+UTILIZZO:
+  ./stereo251_upmix.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
 
-    # Altrimenti, parsing classico: codec bitrate mode file
-    else
-        OUT_CODEC="${1:-eac3}"
-        BITRATE="${2:-320k}"
-        MODE="${3:-modern}"
-        INPUT_FILE="${4:-}"
+PARAMETRI:
+  ac3|eac3  : Codec audio in uscita.
+  si|no     : Conserva traccia stereo originale come secondaria.
+  file      : Nome del file (o "" per batch su cartella).
+  bitrate   : Es. 448k, 640k, 768k (default: 448k).
+  preset    : modern  (Default) Surround reattivi, eq brillante (Azione/Sci-Fi).
+              vintage Surround ritardati, roll-off alto (Stile Dolby Pro Logic).
+
+NOTA:
+  La selezione dello stream e' score-based (allineata a aegis/analyzer):
+  priorita' a tracce stereo (2ch), default, lingua italiana.
+
+ESEMPI:
+  ./stereo251_upmix.sh eac3 no 'movie.mkv' 448k modern
+  ./stereo251_upmix.sh ac3 si '' 640k vintage   # Batch su cartella
+  ./stereo251_upmix.sh eac3 no                   # Batch, default 448k modern
+USAGE
+  exit 1
+}
+
+[[ $# -lt 2 ]] && usage
+
+OUT_CODEC="${1:-}"
+KEEP_STEREO="${2:-no}"
+INPUT_FILE="${3:-}"
+BITRATE="${4:-448k}"
+MODE="${5:-modern}"
+
+case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1;; esac
+[[ "$KEEP_STEREO" =~ ^(si|no)$ ]] || { err "Parametro 2 deve essere 'si' o 'no'"; exit 1; }
+case "$MODE" in modern|vintage) ;; *) err "Preset '$MODE' non valido. Usa modern o vintage."; exit 1;; esac
+
+# --- FIX BITRATE KAMIKAZE ---
+[[ "$BITRATE" =~ k$|M$ ]] || BITRATE="${BITRATE}k"
+# ----------------------------
+
+info "Upmix Mode:     ${MODE^^}"
+info "Codec target:   ${OUT_CODEC^^} @ ${BITRATE}"
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Selezione stream score-based (allineata a aegis/analyzer)
+#
+# Score: 2 canali (stereo) -> +1000, default -> +200, lingua italiana -> +300
+# A parita' di score, vince il primo trovato.
+# Restituisce via stdout: idx|ch|lang
+# ────────────────────────────────────────────────────────────────────────────────
+pick_best_stereo_stream() {
+  local f="$1"
+  local raw_data
+  raw_data=$(ffprobe -v error -select_streams a \
+    -show_entries stream=index,channels:stream_disposition=default:stream_tags=language \
+    -of csv=p=0 "$f" 2>/dev/null </dev/null || true)
+  raw_data="${raw_data//$'\r'/}"
+
+  [[ -z "$raw_data" ]] && return 1
+
+  local best_line="" best_score=-1
+  local lines
+  mapfile -t lines <<< "$raw_data"
+  for line in "${lines[@]}"; do
+    [[ -z "$line" ]] && continue
+    local idx ch def lang
+    IFS=',' read -r idx ch def lang <<<"$line"
+    ch="${ch:-0}"
+    def="${def:-0}"
+    lang="${lang:-}"
+
+    local score=0
+    [[ "$ch" =~ ^[0-9]+$ && "$ch" -eq 2 ]] && score=$((score + 1000))
+    [[ "$def" == "1" ]] && score=$((score + 200))
+    [[ "${lang,,}" =~ ^it ]] && score=$((score + 300))
+
+    if (( score > best_score )); then
+      best_score=$score
+      best_line="${idx}|${ch}|${lang:-und}"
     fi
-fi
+  done
 
-# Validazione bitrate
-[[ "$BITRATE" =~ ^[0-9]+k$ ]] || { warn "Bitrate sospetto: '$BITRATE'. Forzo 320k"; BITRATE="320k"; }
-
-# Validazione Mode
-if [[ "$MODE" != "vintage" && "$MODE" != "modern" ]]; then
-    warn "Modalità '$MODE' sconosciuta. Forzo: modern"
-    MODE="modern"
-fi
-
-info "Configurazione: Codec=$OUT_CODEC | Bitrate=$BITRATE | Mode=$MODE"
+  [[ -n "$best_line" ]] || return 1
+  echo "$best_line"
+}
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Logica Upmix
-# ────────────────────────────────────────────────────────────────────────────────
-
-EQ_VOICE="equalizer=f=230:t=q:w=2.0:g=-4.5,equalizer=f=350:t=q:w=1.5:g=-2.5,equalizer=f=1000:t=q:w=1.2:g=1.6,equalizer=f=2500:t=q:w=1.0:g=1.6,equalizer=f=7200:t=q:w=2.5:g=-1.2"
-
-if [[ "$MODE" == "vintage" ]]; then
-    # VINTAGE (Twin Peaks, X-Files, Film <2000)
-    SUR_DELAY="12"
-    SUR_VOL="0.65"
-    SUR_LP="6000"
-    info "Engine: VINTAGE (Delay 12ms, Lowpass 6kHz, Vol basso)"
-else
-    # MODERN (Star Trek, Netflix, Action)
-    SUR_DELAY="25"
-    SUR_VOL="0.90"
-    SUR_LP="12000"
-    info "Engine: MODERN (Delay 25ms, Lowpass 12kHz, Vol alto)"
-fi
-
-# FIX CRITICO: channel_layout=5.1(side) invece di 5.1 generico
-UPMIX_FILTER="[0:a]asplit=4[front][c_in][lfe_in][surr_in];[front]aformat=channel_layouts=stereo[FLFR];[c_in]pan=mono|c0=0.5*c0+0.5*c1,${EQ_VOICE},aformat=channel_layouts=mono[FC];[lfe_in]pan=mono|c0=0.5*c0+0.5*c1,lowpass=f=120,aformat=channel_layouts=mono[LFE];[surr_in]adelay=${SUR_DELAY}|${SUR_DELAY},lowpass=f=${SUR_LP},volume=${SUR_VOL},aformat=channel_layouts=stereo[SLSR];[FLFR][FC][LFE][SLSR]join=inputs=4:channel_layout=5.1(side):map=0.0-FL|0.1-FR|1.0-FC|2.0-LFE|3.0-SL|3.1-SR,alimiter=limit=0.99:attack=5:release=50[aout]"
-
-# ────────────────────────────────────────────────────────────────────────────────
-# Esecuzione
+# Raccolta file (glob allineato al processore 5.1)
 # ────────────────────────────────────────────────────────────────────────────────
 FILES=()
-if [[ -n "$INPUT_FILE" ]]; then 
+if [[ -n "$INPUT_FILE" ]]; then
+    [[ -f "$INPUT_FILE" ]] || { err "File '$INPUT_FILE' inesistente."; exit 1; }
     FILES+=("$INPUT_FILE")
-else 
-    # Se nessun file specificato, cerca nella cartella
+else
     shopt -s nullglob
-    FILES+=( *.mkv *.mp4 *.avi )
+    FILES+=( *.mkv *.MKV *.mp4 *.MP4 *.avi *.AVI *.mka *.MKA \
+             *.m2ts *.M2TS *.wav *.WAV *.flac *.FLAC )
     shopt -u nullglob
 fi
 
-(( ${#FILES[@]} == 0 )) && { err "Nessun file trovato."; exit 1; }
+(( ${#FILES[@]} == 0 )) && { err "Nessun file trovato da processare."; exit 1; }
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Configurazione preset
+# ────────────────────────────────────────────────────────────────────────────────
+# Surround: il segnale side (FL-FR / FR-FL) puo' essere molto energetico su
+# contenuto con stereo-wide (musica, film con ampio soundstage).
+# Volume conservativo per evitare che i surround sovrastino i frontali.
+case "$MODE" in
+  vintage)
+    SUR_DELAY="25"
+    SUR_EQ="lowpass=f=7000"
+    SUR_VOL="0.70"
+    MODE_TITLE="Vintage (Pro Logic)"
+    ;;
+  modern)
+    SUR_DELAY="12"
+    SUR_EQ="equalizer=f=6000:t=q:w=1:g=2.5"
+    SUR_VOL="0.85"
+    MODE_TITLE="Modern (Haas)"
+    ;;
+esac
+
+# ────────────────────────────────────────────────────────────────────────────────
+# CICLO ELABORAZIONE
+# ────────────────────────────────────────────────────────────────────────────────
+OVERWRITE_ALL=false
 
 for CUR_FILE in "${FILES[@]}"; do
   info "Elaborazione: $CUR_FILE"
 
-  CHANNELS=$(ffprobe -v error -select_streams a:0 \
-    -show_entries stream=channels \
-    -of default=noprint_wrappers=1:nokey=1 "$CUR_FILE" | head -n1 | tr -d '\r')
+  # Selezione stream score-based
+  PROBE_RESULT=$(pick_best_stereo_stream "$CUR_FILE") || { warn "Nessuna traccia audio trovata. Salto."; continue; }
 
-  [[ -z "$CHANNELS" ]] && { warn "Nessuna traccia audio in $CUR_FILE. Salto."; continue; }
+  IFS='|' read -r A_STREAM_INDEX A_CHANNELS A_LANG <<<"$PROBE_RESULT"
 
-  if [[ "$CHANNELS" -ne 2 ]]; then
-    warn "Non è stereo (Canali: $CHANNELS). Salto."
+  if [[ "$A_CHANNELS" -ne 2 ]]; then
+    warn "Stream selezionato non e' stereo (Canali: $A_CHANNELS). Salto."
     continue
   fi
 
-  BASENAME="${CUR_FILE%.*}"
-  OUT_FILE="${BASENAME}_UPMIX_5.1_${MODE^^}.mkv"
+  info "Stream [$A_STREAM_INDEX]: ${A_CHANNELS}ch, lingua: ${A_LANG:-und}"
 
-  [[ -f "$OUT_FILE" ]] && {
-      read -p "File esistente: $OUT_FILE. Sovrascrivere? [s/N] " ans
-      [[ ! "$ans" =~ ^[sS] ]] && continue
-  }
+  # ── Matrice Upmix ──────────────────────────────────────────────────────────
+  # asplit=3: una copia per L/R diretti, una per mid (FC+LFE), una per side (SL/SR).
+  #
+  # Crossover FC/LFE:
+  #   FC = mid (0.5*FL+0.5*FR) con highpass 80Hz → toglie le basse dal centro
+  #   LFE = mid con lowpass 120Hz + volume -6dB → sub pulito senza doppio-basso
+  #   Le due bande non si sovrappongono (80-120Hz di overlap minimo, accettabile).
+  #
+  # Surround:
+  #   SL = (FL-FR) decorrelato, SR = (FR-FL) decorrelato
+  #   Delay Haas + EQ preset-dipendente + volume conservativo
+  #
+  # Limiter:
+  #   level=0 → no auto-leveling (allineato al processore 5.1)
+  #   Il gain e' interamente governato dai volume= nei blocchi.
+  UPMIX_FILTER="
+[0:${A_STREAM_INDEX}]asplit=3[lr][mid][side];
+[lr]channelsplit=channel_layout=stereo[FL_out][FR_out];
+[mid]pan=1c|c0=0.5*FL+0.5*FR[mid_mono];
+[mid_mono]asplit=2[fc_in][lfe_in];
+[fc_in]highpass=f=80,equalizer=f=2500:t=q:w=1.2:g=1.5[FC_out];
+[lfe_in]lowpass=f=120,volume=0.5[LFE_out];
+[side]asplit=2[sl_in][sr_in];
+[sl_in]pan=1c|c0=FL-FR,adelay=${SUR_DELAY},${SUR_EQ},volume=${SUR_VOL}[SL_out];
+[sr_in]pan=1c|c0=FR-FL,adelay=${SUR_DELAY},${SUR_EQ},volume=${SUR_VOL}[SR_out];
+[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
+alimiter=limit=0.97:attack=3.0:release=60:level=0[aout]
+"
 
-  CMD=(ffmpeg -y -hide_banner -nostdin -stats -loglevel warning \
-    -i "$CUR_FILE" \
-    -map_metadata 0 -map_chapters 0 \
-    -filter_complex "$UPMIX_FILTER" \
-    -map 0:v -c:v copy \
-    -map 0:t? -c:t copy \
-    -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" \
-    -metadata:s:a:0 title="Upmix 5.1 Gemini (${MODE^^})" \
-    -disposition:a:0 default \
-    "$OUT_FILE")
+  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_${MODE^^}.mkv"
 
-  if "${CMD[@]}"; then
-    ok "Creato: $OUT_FILE"
-  else
-    err "Errore su $CUR_FILE"
+  # ── Gestione sovrascrittura (s/n/t) — allineata al processore 5.1 ──────────
+  if [[ -f "$OUT_FILE" ]]; then
+    if [[ "$OVERWRITE_ALL" == false ]]; then
+      echo -ne "${C_WARN} Il file '$OUT_FILE' esiste. Sovrascrivere? [s/n/t] (s=si, n=no, t=tutti): "
+      read -r ans < /dev/tty
+      case "${ans,,}" in
+        t|tutti)
+          OVERWRITE_ALL=true
+          info "God mode attivato: sovrascrittura automatica da qui in poi."
+          ;;
+        s|si|y|yes)
+          info "Sovrascrivo questo file."
+          ;;
+        *)
+          info "Skippo '$CUR_FILE'."
+          continue
+          ;;
+      esac
+    else
+      info "Sovrascrittura automatica di '$OUT_FILE'..."
+    fi
   fi
+
+  # ── FFmpeg Command ─────────────────────────────────────────────────────────
+  # -y solo se il file esiste (l'utente ha confermato la sovrascrittura)
+  CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning)
+  [[ -f "$OUT_FILE" ]] && CMD+=( -y )
+  CMD+=(
+    -i "$CUR_FILE"
+    -map_metadata 0 -map_chapters 0
+    -filter_complex "$UPMIX_FILTER"
+    -map "0:V:0?" -c:v copy
+    -map "0:s?" -c:s copy
+    -map "0:t?" -c:t copy
+    -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -ar:a:0 48000 -ac:a:0 6
+    -metadata:s:a:0 title="${OUT_CODEC^^} 5.1 – Upmix ${MODE_TITLE}"
+    -disposition:a:0 default
+  )
+
+  if [[ "$KEEP_STEREO" == "si" ]]; then
+    CMD+=( -map 0:"$A_STREAM_INDEX" -c:a:1 copy
+           -metadata:s:a:1 title="Stereo Originale 2.0"
+           -disposition:a:1 0 )
+  fi
+
+  [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]] && CMD+=( -metadata:s:a:0 language="$A_LANG" )
+
+  CMD+=( "$OUT_FILE" )
+  "${CMD[@]}" && ok "Creato: $OUT_FILE" || warn "Errore su: $CUR_FILE"
 done
+
+ok "Elaborazione completata."
