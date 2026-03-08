@@ -592,7 +592,9 @@ if [[ "$MODE" == "lra" || "$MODE" == "delta" ]] && [[ "${#GLOBAL_METRIC_VALUES[@
         file_preset="$season_preset"
       fi
       file_preset_lower="${file_preset,,}"
-      echo "\"\$PROC\" \"\$CODEC\" \"\$KEEP\" '${GLOBAL_METRIC_PATHS[$i]}' \"\$BITRATE\" ${file_preset_lower}  # ${MODE^^} ${GLOBAL_METRIC_VALUES[$i]} ${UNIT}"
+      escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}") 
+      printf '"$PROC" "$CODEC" "$KEEP" %s "$BITRATE" %s  # %s %s %s\n' \
+        "$escaped_path" "$file_preset_lower" "${MODE^^}" "${GLOBAL_METRIC_VALUES[$i]}" "$UNIT"
     done
 
     echo ''
