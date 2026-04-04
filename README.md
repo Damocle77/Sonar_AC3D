@@ -2,7 +2,7 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonary Suite — Psychoacoustic Surround Toolkit (FFmpeg)
+# 🎧 Sonary Suite - Psychoacoustic Surround Toolkit (FFmpeg)
 
 Suite di script **FFmpeg-based** per lavorare **offline** sull’audio stereo, 5.1 e sul workflow **Atmos → 5.1 DynNorm + preservazione traccia originale**, con un obiettivo semplice e brutale: **capire cosa c’è nel mix, misurarlo, e correggere solo dove serve**.
 
@@ -73,7 +73,7 @@ Questa versione del README è allineata ai file della suite che stai usando ora:
 
 | Preset | Filosofia | Energia effettiva (indicativa) |
 |-------|-----------|-------------------------------|
-| **VOICE** | Solo tailoring voce sul centrale, surround attenuati e quasi pass-through | ~1.08× |
+| **VOICE** | Solo tailoring voce sul centrale, surround pass-through | ~1.08× |
 | **AURA** | Wide light, spazio soft, poco affaticante | ~1.37× |
 | **WIDE** | Ampiezza orizzontale, illusione 7.1 | ~1.97× |
 | **AEGIS** | Cupola controllata, Neural-X like | ~2.18× |
