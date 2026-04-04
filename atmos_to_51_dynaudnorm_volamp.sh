@@ -33,6 +33,26 @@ warn(){ echo -e "${C_WARN} $*"; }
 err(){  echo -e "${C_ERR}  $*"; }
 ok(){   echo -e "${C_OK}  $*"; }
 
+confirm_overwrite() {
+  local target="$1"
+  local ans=""
+  if [[ ! -e /dev/tty ]]; then
+    warn "TTY non disponibile e '$target' esiste gia' -> skip automatico."
+    return 1
+  fi
+  echo -ne "${C_WARN} '$target' esiste gia'. Sovrascrivere? [s/n/t]: "
+  if ! read -r ans < /dev/tty; then
+    warn "Impossibile leggere da /dev/tty -> skip automatico."
+    return 1
+  fi
+  case "${ans,,}" in
+    t|tutti) OVERWRITE_ALL=true; info "Sovrascrittura automatica attivata."; return 0 ;;
+    s|si|y|yes) info "Sovrascrivo."; return 0 ;;
+    *) info "Skip manuale richiesto."; return 1 ;;
+  esac
+}
+
+
 usage() {
   cat <<'USAGE'
 UTILIZZO:
@@ -70,6 +90,7 @@ done
 INPUT_ARG="${1:-}"
 BITRATE="${2:-640k}"
 
+[[ "$BITRATE" =~ ^[0-9]+(k|M)?$ ]] || { err "Bitrate '$BITRATE' non valido. Es: 640k, 768k."; exit 1; }
 # Fix bitrate senza suffisso
 [[ "$BITRATE" =~ k$|M$ ]] || BITRATE="${BITRATE}k"
 
@@ -96,7 +117,7 @@ find_atmos_stream() {
   local f="$1"
   local _lines
 
-  # Probe base: indice, codec, canali, lingua (no profilo = no spazi insidiosi)
+  # Probe base: indice globale, codec, canali, lingua (no profilo = no spazi insidiosi)
   mapfile -t _lines < <(ffprobe -v error -select_streams a \
     -show_entries stream=index,codec_name,channels:stream_tags=language \
     -of csv=p=0 "$f" 2>/dev/null || true)
@@ -104,9 +125,11 @@ find_atmos_stream() {
   [[ ${#_lines[@]} -gt 0 ]] || return 1
 
   local best_idx="" best_ch=0 best_lang="" fallback_idx="" fallback_ch=0 fallback_lang=""
+  local audio_ord=0
 
   for line in "${_lines[@]}"; do
-    [[ -z "$line" ]] && continue
+    [[ -z "$line" ]] && { ((audio_ord++)) || true; continue; }
+
     local idx codec ch lang
     IFS=',' read -r idx codec ch lang <<<"$line"
     codec="${codec:-}"
@@ -114,13 +137,16 @@ find_atmos_stream() {
     lang="${lang:-}"
 
     # Solo EAC3
-    [[ "$codec" == "eac3" ]] || continue
+    if [[ "$codec" != "eac3" ]]; then
+      ((audio_ord++)) || true
+      continue
+    fi
 
     local is_atmos=false
 
-    # Metodo 1: profilo contiene "atmos" (probe dedicata per singolo stream)
+    # Metodo 1: profilo contiene "atmos" (usa indice relativo audio, non globale)
     local profile_str
-    profile_str=$(ffprobe -v error -select_streams "$idx" \
+    profile_str=$(ffprobe -v error -select_streams "a:${audio_ord}" \
       -show_entries stream=profile \
       -of csv=p=0 "$f" 2>/dev/null | head -1 || true)
     [[ "${profile_str,,}" == *"atmos"* ]] && is_atmos=true
@@ -128,7 +154,7 @@ find_atmos_stream() {
     # Metodo 2: check joc_complexity via side_data (FFmpeg 5+)
     if [[ "$is_atmos" == false ]]; then
       local joc
-      joc=$(ffprobe -v error -select_streams "$idx" \
+      joc=$(ffprobe -v error -select_streams "a:${audio_ord}" \
         -show_entries frame_side_data=joc_complexity \
         -read_intervals "%+#1" \
         -of csv=p=0 "$f" 2>/dev/null | head -1 || true)
@@ -147,6 +173,8 @@ find_atmos_stream() {
       fallback_ch="$ch"
       fallback_lang="$lang"
     fi
+
+    ((audio_ord++)) || true
   done
 
   if [[ -n "$best_idx" ]]; then
@@ -178,6 +206,20 @@ else
   err "File o cartella non esiste: $INPUT_ARG"; exit 1
 fi
 
+FILTERED_FILES=()
+for f in "${FILES[@]}"; do
+  case "$f" in
+    *_EAC3_51_DynNorm.mkv)
+      info "Skip output gia' normalizzato: $f"
+      continue
+      ;;
+    *)
+      FILTERED_FILES+=("$f")
+      ;;
+  esac
+done
+FILES=("${FILTERED_FILES[@]}")
+
 (( ${#FILES[@]} == 0 )) && { err "Nessun file trovato."; exit 1; }
 
 info "Bitrate 5.1: $BITRATE"
@@ -202,9 +244,7 @@ for CUR_FILE in "${FILES[@]}"; do
 
   # Determina layout per il pan filter
   # EAC3 Atmos decodificato esce tipicamente come 5.1(side)
-  A_LAYOUT=$(ffprobe -v error -select_streams "$A_IDX" \
-    -show_entries stream=channel_layout \
-    -of csv=p=0 "$CUR_FILE" 2>/dev/null | head -1 || true)
+  A_LAYOUT=$(ffprobe -v error -select_streams a     -show_entries stream=index,channel_layout     -of csv=p=0 "$CUR_FILE" 2>/dev/null | awk -F',' -v idx="$A_IDX" '$1==idx { print $2; exit }' || true)
 
   # Se il layout non è esposto (capita con certi container), deduciamo da ch count
   if [[ -z "$A_LAYOUT" && "$A_CH" -ge 6 ]]; then
@@ -227,13 +267,7 @@ for CUR_FILE in "${FILES[@]}"; do
   # ── Gestione sovrascrittura ─────────────────────────────────────────────────
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
-      echo -ne "${C_WARN} '$OUT_FILE' esiste già. Sovrascrivere? [s/n/t]: "
-      read -r ans < /dev/tty
-      case "${ans,,}" in
-        t|tutti) OVERWRITE_ALL=true; info "Sovrascrittura automatica attivata." ;;
-        s|si|y|yes) info "Sovrascrivo." ;;
-        *) info "Salto '$CUR_FILE'."; continue ;;
-      esac
+      confirm_overwrite "$OUT_FILE" || { info "Salto '$CUR_FILE'."; continue; }
     else
       info "Sovrascrittura automatica: '$OUT_FILE'"
     fi

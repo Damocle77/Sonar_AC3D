@@ -72,12 +72,34 @@ case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1;
 [[ "$KEEP_STEREO" =~ ^(si|no)$ ]] || { err "Parametro 2 deve essere 'si' o 'no'"; exit 1; }
 case "$MODE" in modern|vintage) ;; *) err "Preset '$MODE' non valido. Usa modern o vintage."; exit 1;; esac
 
+[[ "$BITRATE" =~ ^[0-9]+(k|M)?$ ]] || { err "Bitrate '$BITRATE' non valido. Es: 448k, 640k, 768k."; exit 1; }
+
 # --- FIX BITRATE KAMIKAZE ---
 [[ "$BITRATE" =~ k$|M$ ]] || BITRATE="${BITRATE}k"
 # ----------------------------
 
 info "Upmix Mode:     ${MODE^^}"
 info "Codec target:   ${OUT_CODEC^^} @ ${BITRATE}"
+
+confirm_overwrite() {
+  local target="$1"
+  local ans=""
+  if [[ ! -e /dev/tty ]]; then
+    warn "TTY non disponibile e '$target' esiste gia' -> skip automatico."
+    return 1
+  fi
+  echo -ne "${C_WARN} Il file '$target' esiste. Sovrascrivere? [s/n/t] (s=si, n=no, t=tutti): "
+  if ! read -r ans < /dev/tty; then
+    warn "Impossibile leggere da /dev/tty -> skip automatico."
+    return 1
+  fi
+  case "${ans,,}" in
+    t|tutti) OVERWRITE_ALL=true; info "God mode attivato: sovrascrittura automatica da qui in poi."; return 0 ;;
+    s|si|y|yes) info "Sovrascrivo questo file."; return 0 ;;
+    *) info "Skip manuale richiesto."; return 1 ;;
+  esac
+}
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Selezione stream score-based (allineata a aegis/analyzer)
@@ -135,6 +157,20 @@ else
              *.m2ts *.M2TS *.wav *.WAV *.flac *.FLAC )
     shopt -u nullglob
 fi
+
+FILTERED_FILES=()
+for f in "${FILES[@]}"; do
+  case "$f" in
+    *_UPMIX_5.1_MODERN.mkv|*_UPMIX_5.1_VINTAGE.mkv)
+      info "Skip output gia' upmixato: $f"
+      continue
+      ;;
+    *)
+      FILTERED_FILES+=("$f")
+      ;;
+  esac
+done
+FILES=("${FILTERED_FILES[@]}")
 
 (( ${#FILES[@]} == 0 )) && { err "Nessun file trovato da processare."; exit 1; }
 
@@ -213,21 +249,7 @@ alimiter=limit=0.97:attack=3.0:release=60:level=0[aout]
   # ── Gestione sovrascrittura (s/n/t) — allineata al processore 5.1 ──────────
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
-      echo -ne "${C_WARN} Il file '$OUT_FILE' esiste. Sovrascrivere? [s/n/t] (s=si, n=no, t=tutti): "
-      read -r ans < /dev/tty
-      case "${ans,,}" in
-        t|tutti)
-          OVERWRITE_ALL=true
-          info "God mode attivato: sovrascrittura automatica da qui in poi."
-          ;;
-        s|si|y|yes)
-          info "Sovrascrivo questo file."
-          ;;
-        *)
-          info "Skippo '$CUR_FILE'."
-          continue
-          ;;
-      esac
+      confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; continue; }
     else
       info "Sovrascrittura automatica di '$OUT_FILE'..."
     fi

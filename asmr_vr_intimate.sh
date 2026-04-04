@@ -40,6 +40,8 @@ KEEP_ORIG=0
 FORCE_OVERWRITE=0
 USE_LFO=0
 DISTANCE_MODE="whisper"
+OUT_CODEC="aac"
+OUT_BITRATE="320k"
 
 show_help() {
   cat <<'EOF'
@@ -51,6 +53,8 @@ OPZIONI:
   -d <mode>   Distanza: whisper (20-30cm) | near (30-50cm) | center (front)
   -k          Mantieni audio originale come traccia secondaria
   -l          Attiva effetto "Breathing LFO" (modulazione lenta ipnotica)
+  -c <codec>  Codec audio output: aac (default) | opus | flac
+  -b <rate>   Bitrate output (default: 320k, ignorato per flac)
   -f          Forza sovrascrittura senza chiedere
   -h          Mostra questa guida
 
@@ -64,7 +68,7 @@ PRESET:
 
 NOTE:
   BS2B J.Meier: algoritmo psicoacustico per eliminare la fatica in cuffia.
-  Codec AAC 320k: massima fedelta' per i micro-dettagli ASMR.
+  Codec/bitrate configurabili: default AAC 320k per massima fedelta'.
   La selezione stream e' score-based (allineata a aegis/analyzer/upmix):
   priorita' a tracce stereo (2ch), default, lingua italiana.
 EOF
@@ -73,10 +77,12 @@ EOF
 
 [[ $# -eq 0 ]] && { show_help; }
 
-while getopts ":o:d:kfhl" opt; do
+while getopts ":o:d:c:b:kfhl" opt; do
   case "$opt" in
     o) OUTDIR="$OPTARG" ;;
     d) DISTANCE_MODE="$OPTARG" ;;
+    c) OUT_CODEC="$OPTARG" ;;
+    b) OUT_BITRATE="$OPTARG" ;;
     k) KEEP_ORIG=1 ;;
     f) FORCE_OVERWRITE=1 ;;
     l) USE_LFO=1 ;;
@@ -92,11 +98,41 @@ case "$DISTANCE_MODE" in
   *) err "Distanza '$DISTANCE_MODE' non valida. Usa whisper, near o center."; exit 1 ;;
 esac
 
+case "${OUT_CODEC,,}" in
+  aac|opus|flac) OUT_CODEC="${OUT_CODEC,,}" ;;
+  *) err "Codec '$OUT_CODEC' non valido. Usa aac, opus o flac."; exit 1 ;;
+esac
+
+[[ "$OUT_BITRATE" =~ ^[0-9]+(k|M)?$ ]] || [[ "$OUT_CODEC" == "flac" ]] || { err "Bitrate '$OUT_BITRATE' non valido. Es: 192k, 256k, 320k."; exit 1; }
+[[ "$OUT_BITRATE" =~ k$|M$ ]] || OUT_BITRATE="${OUT_BITRATE}k"
+
 (( $# == 0 )) && { err "Nessun file specificato. Usa -h per l'aiuto."; exit 1; }
 
 LFO_STATUS="Disattivo"; [[ "$USE_LFO" -eq 1 ]] && LFO_STATUS="Attivo"
 info "Preset:  ${DISTANCE_MODE^^}"
 info "LFO:     ${LFO_STATUS}"
+info "Codec:   ${OUT_CODEC^^}"
+[[ "$OUT_CODEC" != "flac" ]] && info "Bitrate: ${OUT_BITRATE}"
+
+confirm_overwrite() {
+  local target="$1"
+  local ans=""
+  if [[ ! -e /dev/tty ]]; then
+    warn "TTY non disponibile e '$target' esiste gia' -> skip automatico."
+    return 1
+  fi
+  echo -ne "${C_WARN} Il file '$target' esiste. Sovrascrivere? [s/n/t] (s=si, n=no, t=tutti): "
+  if ! read -r ans < /dev/tty; then
+    warn "Impossibile leggere da /dev/tty -> skip automatico."
+    return 1
+  fi
+  case "${ans,,}" in
+    t|tutti) OVERWRITE_ALL=true; info "God mode attivato: sovrascrittura automatica da qui in poi."; return 0 ;;
+    s|si|y|yes) info "Sovrascrivo questo file."; return 0 ;;
+    *) info "Skip manuale richiesto."; return 1 ;;
+  esac
+}
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Selezione stream score-based (allineata a aegis/analyzer/upmix)
@@ -223,21 +259,7 @@ for CUR_FILE in "$@"; do
   # ── Gestione sovrascrittura (s/n/t) — allineata a aegis/upmix ─────────────
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
-      echo -ne "${C_WARN} Il file '$OUT_FILE' esiste. Sovrascrivere? [s/n/t] (s=si, n=no, t=tutti): "
-      read -r ans < /dev/tty
-      case "${ans,,}" in
-        t|tutti)
-          OVERWRITE_ALL=true
-          info "God mode attivato: sovrascrittura automatica da qui in poi."
-          ;;
-        s|si|y|yes)
-          info "Sovrascrivo questo file."
-          ;;
-        *)
-          info "Skippo '$CUR_FILE'."
-          continue
-          ;;
-      esac
+      confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; continue; }
     else
       info "Sovrascrittura automatica di '$OUT_FILE'..."
     fi
@@ -254,10 +276,14 @@ for CUR_FILE in "$@"; do
     -map "0:V:0?" -c:v copy
     -map "0:s?" -c:s copy
     -map "0:t?" -c:t copy
-    -map "[aout]" -c:a:0 aac -b:a:0 320k -ac:a:0 2 -ar:a:0 48000
+    -map "[aout]" -c:a:0 "$OUT_CODEC" -ac:a:0 2 -ar:a:0 48000
     -metadata:s:a:0 title="VR Intimate (${T}) – BS2B J.Meier"
     -disposition:a:0 default
   )
+
+  if [[ "$OUT_CODEC" != "flac" ]]; then
+    CMD+=( -b:a:0 "$OUT_BITRATE" )
+  fi
 
   # Propagazione language tag
   [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]] && CMD+=( -metadata:s:a:0 language="$A_LANG" )

@@ -470,11 +470,11 @@ scan_delta() {
 
   local preset_desc
   case "$preset" in
-    AURA)  preset_desc="Surround fiacchi, allargo la scena posteriore'"      ;;
+    AURA)  preset_desc="Surround fiacchi, allargo la scena posteriore"       ;;
     SONAR) preset_desc="Surround scarsi, spingo verticalmente segnale"       ;;
     WIDE)  preset_desc="Surround decenti, allargo scena sonora laterale"     ;;
     AEGIS) preset_desc="Surround intensi, controllo e bilancio effetti"      ;;
-    VOICE) preset_desc="Surround intatti, regolo solo EQ voce frotale"       ;;
+    VOICE) preset_desc="Surround intatti, regolo solo EQ voce frontale"      ;;
   esac
 
   # Accumulo
@@ -597,7 +597,7 @@ for CUR_FILE in "${FILES[@]}"; do
 done
 
 # ────────────────────────────────────────────────────────────────────────────────
-# VERDETTO STAGIONALE (solo se analizzati >= 2 file)
+# VERDETTO STAGIONALE / GENERAZIONE BATCH
 #
 # Bias audiofilo:
 #   LRA   -> P75 (non sottoutilizzare dinamica alta)
@@ -605,26 +605,37 @@ done
 #            il valore piu' negativo tra il 75% meno estremo)
 #
 # Spread > 4 (LU o dB) -> stagione eterogenea, tabella per-file.
+# Per un singolo file viene comunque generato il batch con il preset del file.
 # ────────────────────────────────────────────────────────────────────────────────
-if [[ "$MODE" == "lra" || "$MODE" == "delta" ]] && [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 1 ]]; then
+if [[ "$MODE" == "lra" || "$MODE" == "delta" ]] && [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   CNT=${#GLOBAL_METRIC_VALUES[@]}
+  HIGH_SPREAD=0
 
-  _vals_tmp=$(mktemp)
-  printf '%s\n' "${GLOBAL_METRIC_VALUES[@]}" > "$_vals_tmp"
+  if [[ "$CNT" -gt 1 ]]; then
+    _vals_tmp=$(mktemp)
+    printf '%s\n' "${GLOBAL_METRIC_VALUES[@]}" > "$_vals_tmp"
 
-  _stats_tmp=$(mktemp)
-  if [[ "$MODE" == "delta" ]]; then
-    # P25 per delta (bias audiofilo: protegge surround deboli)
-    awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; mn=v[1];mx=v[n]; s=0;for(i=1;i<=n;i++)s+=v[i]; avg=s/n; raw=0.25*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; pctl=v[rank]; printf "%.1f %.1f %.1f %.1f\n",mn,mx,avg,pctl}' "$_vals_tmp" > "$_stats_tmp"
+    _stats_tmp=$(mktemp)
+    if [[ "$MODE" == "delta" ]]; then
+      # P25 per delta (bias audiofilo: protegge surround deboli)
+      awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; mn=v[1];mx=v[n]; s=0;for(i=1;i<=n;i++)s+=v[i]; avg=s/n; raw=0.25*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; pctl=v[rank]; printf "%.1f %.1f %.1f %.1f\n",mn,mx,avg,pctl}' "$_vals_tmp" > "$_stats_tmp"
+    else
+      # P75 per LRA (bias audiofilo: non sottoutilizzare dinamica)
+      awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; mn=v[1];mx=v[n]; s=0;for(i=1;i<=n;i++)s+=v[i]; avg=s/n; raw=0.75*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; pctl=v[rank]; printf "%.1f %.1f %.1f %.1f\n",mn,mx,avg,pctl}' "$_vals_tmp" > "$_stats_tmp"
+    fi
+
+    read -r m_min m_max m_avg m_pctl < "$_stats_tmp"
+    rm -f "$_vals_tmp" "$_stats_tmp"
+
+    m_spread=$(awk -v mx="$m_max" -v mn="$m_min" 'BEGIN { s=mx-mn; if(s<0)s=-s; printf "%.1f",s }')
+    HIGH_SPREAD=$(awk -v s="$m_spread" 'BEGIN { print (s > 4.0) ? 1 : 0 }')
   else
-    # P75 per LRA (bias audiofilo: non sottoutilizzare dinamica)
-    awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; mn=v[1];mx=v[n]; s=0;for(i=1;i<=n;i++)s+=v[i]; avg=s/n; raw=0.75*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; pctl=v[rank]; printf "%.1f %.1f %.1f %.1f\n",mn,mx,avg,pctl}' "$_vals_tmp" > "$_stats_tmp"
+    m_min="${GLOBAL_METRIC_VALUES[0]}"
+    m_max="${GLOBAL_METRIC_VALUES[0]}"
+    m_avg="${GLOBAL_METRIC_VALUES[0]}"
+    m_pctl="${GLOBAL_METRIC_VALUES[0]}"
+    m_spread="0.0"
   fi
-
-  read -r m_min m_max m_avg m_pctl < "$_stats_tmp"
-  rm -f "$_vals_tmp" "$_stats_tmp"
-
-  m_spread=$(awk -v mx="$m_max" -v mn="$m_min" 'BEGIN { s=mx-mn; if(s<0)s=-s; printf "%.1f",s }')
 
   season_raw=$(metric_to_preset "$m_pctl")
   season_preset="${season_raw%%|*}"
@@ -652,34 +663,34 @@ if [[ "$MODE" == "lra" || "$MODE" == "delta" ]] && [[ "${#GLOBAL_METRIC_VALUES[@
     esac
   fi
 
-  HIGH_SPREAD=$(awk -v s="$m_spread" 'BEGIN { print (s > 4.0) ? 1 : 0 }')
+  if [[ "$CNT" -gt 1 ]]; then
+    echo -e "  Episodi analizzati:  \033[1;37m${CNT}\033[0m"
+    echo -e "  Media:               \033[0;37m${m_avg} ${UNIT}\033[0m"
+    echo -e "  ${PCTL_LABEL}: ${season_color}${m_pctl} ${UNIT}\033[0m"
+    echo -e "  Range:               \033[0;37m${m_min} / ${m_max} ${UNIT}  (spread: ${m_spread} ${UNIT})\033[0m"
+    echo -e "  Preset Consigliato:  ${season_color}${season_preset}\033[0m  (${season_desc})"
+    if [[ ${#GLOBAL_VOLAMP_VALUES[@]} -gt 0 ]]; then
+      _volamp_tmp=$(mktemp)
+      printf '%s\n' "${GLOBAL_VOLAMP_VALUES[@]}" > "$_volamp_tmp"
+      season_volamp=$(awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; raw=0.75*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; printf "%.1f",v[rank]}' "$_volamp_tmp")
+      rm -f "$_volamp_tmp"
+      echo -e "  Volamp Stagionale:  \033[1;36m${season_volamp} dB\033[0m  (P75 prudente della loudness)"
+    fi
 
-  echo -e "  Episodi analizzati:  \033[1;37m${CNT}\033[0m"
-  echo -e "  Media:               \033[0;37m${m_avg} ${UNIT}\033[0m"
-  echo -e "  ${PCTL_LABEL}: ${season_color}${m_pctl} ${UNIT}\033[0m"
-  echo -e "  Range:               \033[0;37m${m_min} / ${m_max} ${UNIT}  (spread: ${m_spread} ${UNIT})\033[0m"
-  echo -e "  Preset Consigliato:  ${season_color}${season_preset}\033[0m  (${season_desc})"
-  if [[ ${#GLOBAL_VOLAMP_VALUES[@]} -gt 0 ]]; then
-    _volamp_tmp=$(mktemp)
-    printf '%s\n' "${GLOBAL_VOLAMP_VALUES[@]}" > "$_volamp_tmp"
-    season_volamp=$(awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; raw=0.75*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; printf "%.1f",v[rank]}' "$_volamp_tmp")
-    rm -f "$_volamp_tmp"
-    echo -e "  Volamp Stagionale:  [1;36m${season_volamp} dB[0m  (P75 prudente della loudness)"
-  fi
-
-  if [[ "$HIGH_SPREAD" -eq 1 ]]; then
-    echo ""
-    echo -e "  \033[0;33m⚠  Spread > 4 ${UNIT}: la stagione e' eterogenea.\033[0m"
-    echo -e "  \033[0;33m   Per risultati ottimali, considera i preset per-file:\033[0m"
-    echo ""
-    for (( i=0; i<CNT; i++ )); do
-      pf_raw=$(metric_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
-      pf_preset="${pf_raw%%|*}"
-      pf_color="${pf_raw##*|}"
-      fname="${GLOBAL_METRIC_FILES[$i]}"
-      (( ${#fname} > 50 )) && fname="${fname:0:47}..."
-      printf "    %-50s  %b%-5s\033[0m  (%s %s)\n" "$fname" "$pf_color" "$pf_preset" "${GLOBAL_METRIC_VALUES[$i]}" "$UNIT"
-    done
+    if [[ "$HIGH_SPREAD" -eq 1 ]]; then
+      echo ""
+      echo -e "  \033[0;33m⚠  Spread > 4 ${UNIT}: la stagione e' eterogenea.\033[0m"
+      echo -e "  \033[0;33m   Per risultati ottimali, considera i preset per-file:\033[0m"
+      echo ""
+      for (( i=0; i<CNT; i++ )); do
+        pf_raw=$(metric_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
+        pf_preset="${pf_raw%%|*}"
+        pf_color="${pf_raw##*|}"
+        fname="${GLOBAL_METRIC_FILES[$i]}"
+        (( ${#fname} > 50 )) && fname="${fname:0:47}..."
+        printf "    %-50s  %b%-5s\033[0m  (%s %s)\n" "$fname" "$pf_color" "$pf_preset" "${GLOBAL_METRIC_VALUES[$i]}" "$UNIT"
+      done
+    fi
   fi
 
   # ── Generazione batch file ─────────────────────────────────────────────────
@@ -705,26 +716,26 @@ if [[ "$MODE" == "lra" || "$MODE" == "delta" ]] && [[ "${#GLOBAL_METRIC_VALUES[@
     echo "# Nota: l'ultimo parametro numerico e' il volamp consigliato per-file."
 
     for (( i=0; i<CNT; i++ )); do
-    case "${GLOBAL_METRIC_PATHS[$i]}" in
-      *_AC3_Aegis.mkv|*_AC3_Sonar.mkv|*_AC3_Wide.mkv|*_AC3_Aura.mkv|*_AC3_Voice.mkv|\
-      *_EAC3_Aegis.mkv|*_EAC3_Sonar.mkv|*_EAC3_Wide.mkv|*_EAC3_Aura.mkv|*_EAC3_Voice.mkv)
-        continue
-        ;;
-    esac
+      case "${GLOBAL_METRIC_PATHS[$i]}" in
+        *_AC3_Aegis.mkv|*_AC3_Sonar.mkv|*_AC3_Wide.mkv|*_AC3_Aura.mkv|*_AC3_Voice.mkv|\
+        *_EAC3_Aegis.mkv|*_EAC3_Sonar.mkv|*_EAC3_Wide.mkv|*_EAC3_Aura.mkv|*_EAC3_Voice.mkv)
+          continue
+          ;;
+      esac
 
-    file_preset=""
-    if [[ "$HIGH_SPREAD" -eq 1 ]]; then
-      pf_raw=$(metric_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
-      file_preset="${pf_raw%%|*}"
-    else
-      file_preset="$season_preset"
-    fi
-    file_preset_lower="${file_preset,,}"
-    file_volamp="${GLOBAL_VOLAMP_VALUES[$i]:-0}"
-    file_loudness="${GLOBAL_LOUDNESS_VALUES[$i]:-N/A}"
-    escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
+      file_preset=""
+      if [[ "$HIGH_SPREAD" -eq 1 ]]; then
+        pf_raw=$(metric_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
+        file_preset="${pf_raw%%|*}"
+      else
+        file_preset="$season_preset"
+      fi
+      file_preset_lower="${file_preset,,}"
+      file_volamp="${GLOBAL_VOLAMP_VALUES[$i]:-0}"
+      file_loudness="${GLOBAL_LOUDNESS_VALUES[$i]:-N/A}"
+      escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
       printf '"$PROC" "$CODEC" "$KEEP" %s "$BITRATE" %s %s  # %s %s %s | I=%s LUFS | volamp=%s dB\n' \
-      "$escaped_path" "$file_preset_lower" "$file_volamp" "${MODE^^}" "${GLOBAL_METRIC_VALUES[$i]}" "$UNIT" "$file_loudness" "$file_volamp"
+        "$escaped_path" "$file_preset_lower" "$file_volamp" "${MODE^^}" "${GLOBAL_METRIC_VALUES[$i]}" "$UNIT" "$file_loudness" "$file_volamp"
     done
 
     echo ''
@@ -733,7 +744,6 @@ if [[ "$MODE" == "lra" || "$MODE" == "delta" ]] && [[ "${#GLOBAL_METRIC_VALUES[@
 
   chmod +x "$BATCH_FILE"
   ok "Batch file generato: ${BATCH_FILE}"
-
 fi
 echo -e ""
 ok "Analisi completata. Nessun file audio e' stato modificato."
