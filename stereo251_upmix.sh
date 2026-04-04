@@ -3,9 +3,9 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   stereo251_upmix.sh - V2 - Febbraio 2026                                   │
+# │   stereo251_upmix.sh - V2 - Febbraio 2026                                    │
 # │                                                                              │
-# │   Motore di upmix offline da Stereo a 5.1 (eAC3/AC3).                       │
+# │   Motore di upmix offline da Stereo a 5.1 (eAC3/AC3).                        │
 # │   Estrae il canale centrale (Dialoghi) e simula un'ambienza surround         │
 # │   basata su mid/side processing e decorrelazione (Effetto Haas).             │
 # │                                                                              │
@@ -13,9 +13,9 @@ set -uo pipefail
 # │     - Rimosso set -e (allineato a aegis/analyzer)                            │
 # │     - Selezione stream score-based (2ch, default, ita)                       │
 # │     - asplit=3 invece di 6 (meno RAM/CPU)                                    │
-# │     - Crossover FC/LFE: FC highpass 80Hz, LFE lowpass 120Hz + volume -6dB   │
+# │     - Crossover FC/LFE: FC highpass 80Hz, LFE lowpass 120Hz + volume -6dB    │
 # │     - Surround volume ridotto (0.85 modern, 0.70 vintage)                    │
-# │     - Limiter level=0 (no auto-leveling, allineato al processore 5.1)       │
+# │     - Limiter level=0 (no auto-leveling, allineato al processore 5.1)        │
 # │     - -y condizionale (solo su sovrascrittura confermata)                    │
 # │     - Prompt overwrite da /dev/tty + opzione "tutti"                         │
 # │     - Glob estesi + formati uppercase                                        │

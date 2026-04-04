@@ -4,21 +4,21 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   asmr_vr_intimate.sh - V2 - Marzo 2026                                     │
+# │   asmr_vr_intimate.sh - V2 - Marzo 2026                                      │
 # │                                                                              │
 # │   Processing binaurale ottimizzato per ASMR / VR / contenuto intimo.         │
-# │   Simula vicinanza della sorgente sonora (20-50cm) con crossfeed BS2B       │
-# │   J.Meier, ITD (Interaural Time Difference) e EQ psicoacustico.             │
+# │   Simula vicinanza della sorgente sonora (20-50cm) con crossfeed BS2B        │
+# │   J.Meier, ITD (Interaural Time Difference) e EQ psicoacustico.              │
 # │                                                                              │
 # │   CHANGELOG V2:                                                              │
-# │     - Rimosso set -e (allineato a aegis/analyzer/upmix)                     │
-# │     - Selezione stream score-based (stereo, default, ita)                   │
+# │     - Rimosso set -e (allineato a aegis/analyzer/upmix)                      │
+# │     - Selezione stream score-based (stereo, default, ita)                    │
 # │     - -y condizionale (solo su sovrascrittura confermata)                    │
-# │     - Prompt overwrite da /dev/tty con opzione "tutti" (-f)                 │
+# │     - Prompt overwrite da /dev/tty con opzione "tutti" (-f)                  │
 # │     - Propagazione language tag                                              │
-# │     - LFO fix: tremolo+flanger (la pan= non supporta espressioni t-varianti)│
+# │     - LFO fix: tremolo+flanger (la pan= non supporta espressioni t-varianti) │
 # │     - Keep originale come traccia secondaria (-k)                            │
-# │     - loudnorm mantenuto (target LUFS per-preset, coerente con uso ASMR)   │
+# │     - loudnorm mantenuto (target LUFS per-preset, coerente con uso ASMR)     │
 # ╰──────────────────────────────────────────────────────────────────────────────╯
 
 C_INFO="\033[0;36m[INFO]\033[0m"
