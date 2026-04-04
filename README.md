@@ -411,7 +411,7 @@ oppure:
 
 ## 📄 Licenza
 
-MIT License — vedi `LICENSE`
+License MIT
 
 ---
 
