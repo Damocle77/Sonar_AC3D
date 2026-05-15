@@ -690,4 +690,4 @@ MIT License
 
 **Sandro (D@mocle77) Sabbioni**
 
-> Per riportare ordine nella Forza Sonora serve solo uno script Bash. E una tolleranza patologica verso i log di FFmpeg.
+> Per riportare ordine nella Forza Sonora serve solo uno script Bash...questa è la via!
