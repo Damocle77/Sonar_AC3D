@@ -2,52 +2,64 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Sonary Suite - Psychoacoustic Surround Toolkit (FFmpeg)
+# 🎧 Sonary Suite - Psychoacoustic FFMPEG Toolkit
 
-Suite di script **FFmpeg-based** per lavorare **offline** sull’audio stereo, 5.1 e sul workflow **Atmos → 5.1 DynNorm + preservazione traccia originale**, con un obiettivo semplice e brutale: **capire cosa c’è nel mix, misurarlo, e correggere solo dove serve**.
+Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracce audio stereo, 5.1 e Atmos/EAC3 in modo offline, ripetibile e controllato.
 
-Pensata per AVR usati in modalità **Straight / Pure / Direct** e per chi preferisce una pipeline trasparente, ragionata e replicabile, invece di DSP opachi che fanno cose “perché sì”.
+L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare solo il processing necessario**. Niente magia nera da DSP opaco, niente pulsanti “enhance” da film poliziesco del 2003. Solo FFmpeg, euristiche dichiarate e preset psicoacustici ragionati.
 
-> “Non tutti i supereroi indossano un mantello… a volte basta un `-filter_complex`.”
+Pensata per AVR usati in modalità **Straight / Pure / Direct**, con particolare attenzione a:
 
----
+- intelligibilità dei dialoghi a basso volume;
+- surround presenti ma non invadenti;
+- frontali FL/FR il più possibile neutri;
+- centrale più leggibile senza effetto megafono;
+- gestione prudente del loudness tramite `volamp`;
+- workflow batch per stagioni, film e cartelle intere.
 
-## 🧠 Filosofia del progetto
-
-Principio guida:
-
-> *correggere solo ciò che serve, dove serve, e nel modo meno invasivo possibile.*
-
-Scelte conseguenti:
-
-- elaborazione **offline**
-- **FL / FR neutri** nei processing 5.1
-- canale **centrale (FC)** con EQ voce dedicata
-- surround come elemento davvero variabile: **Sonar / Wide / Aegis / Aura / Voice**
-- workflow **misura → decisione → processing**
-- gain finale separato dal processing tramite **volamp**
-- pipeline Atmos gestita come **conversione in dual-track di lavoro**, con core 5.1 pronto per analisi e processing
+> Non tutti i supereroi indossano un mantello. Alcuni litigano con `filter_complex`.
 
 ---
 
-## ✅ Requisiti
+## Indice
+
+- [Requisiti](#requisiti)
+- [Installazione](#installazione)
+- [Script inclusi](#script-inclusi)
+- [Workflow rapido](#workflow-rapido)
+- [1. Analyzer 5.1 Delta / Volamp](#1-audio_analyzer_volamp_psychosh)
+- [2. Processing 5.1 Aegis / Sonar / Wide / Aura / Voice](#2-aegis_sonar_wide_aura_voice_volamp_psychosh)
+- [3. Upmix stereo → 5.1 V7 PSY120](#3-stereo251_upmix_psychosh)
+- [4. ASMR / VR Intimate stereo](#4-asmr_vr_intimate_psychosh)
+- [5. Atmos/EAC3 → 5.1 DynNorm + Atmos originale](#5-atmos_to_51_dynaudnorm_volamp_psichosh)
+- [Preset 5.1](#preset-51)
+- [Volamp](#volamp)
+- [Diagrammi pipeline](#diagrammi-pipeline)
+- [Benchmark orientativo](#benchmark-orientativo)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Requisiti
 
 ### Software
-- **FFmpeg 7+**
+
+- **FFmpeg 7+** consigliato
 - **ffprobe**
 - **Bash 4.x+**
-- **awk** (richiesto dagli analyzer)
+- **awk** per l'analyzer
 
 ### Sistemi operativi
+
 - Linux
 - macOS
-- Windows: **WSL2**, **Git-Bash**, **MSYS2**
+- Windows tramite **MSYS2**, **Git Bash** o **WSL2**
 
-> Nota pratica: **AC3 / E-AC3 vengono codificati via CPU**. L’eventuale accelerazione hardware riguarda in genere solo il video.
+> Nota pratica: AC3/EAC3 vengono codificati via CPU. L'accelerazione hardware, quando c'è, riguarda quasi sempre il video. Sì, anche nel 2026 dobbiamo ancora dirlo.
 
 ---
 
-## 🚀 Installazione
+## Installazione
 
 ```bash
 git clone https://github.com/Damocle77/Sonary_Suite.git
@@ -55,188 +67,424 @@ cd Sonary_Suite
 chmod +x *.sh
 ```
 
----
+Verifica base:
 
-## 🧩 Script inclusi
-
-Questa versione del README è allineata ai file della suite che stai usando ora:
-
-- `audio_analyzer_volamp.sh`
-- `aegis_sonar_wide_aura_voice_volamp.sh`
-- `stereo251_upmix.sh`
-- `asmr_vr_intimate.sh`
-- `atmos_to_51_dynaudnorm_volamp.sh`
-
----
-
-## 🎚️ Preset 5.1 disponibili
-
-| Preset | Filosofia | Energia effettiva (indicativa) |
-|-------|-----------|-------------------------------|
-| **VOICE** | Solo tailoring voce sul centrale, surround pass-through | ~1.08× |
-| **AURA** | Wide light, spazio soft, poco affaticante | ~1.37× |
-| **WIDE** | Ampiezza orizzontale, illusione 7.1 | ~1.97× |
-| **AEGIS** | Cupola controllata, Neural-X like | ~2.18× |
-| **SONAR** | Altezza psicoacustica, illusione 5.1.2 | ~3.69× |
-
----
-
-## 📦 1) `audio_analyzer_volamp.sh`
-
-Analyzer principale per container audio/video.
-
-Funzioni:
-
-- elenca la struttura audio
-- misura il contenuto
-- suggerisce il preset ottimale per `aegis_sonar_wide_aura_voice_volamp.sh`
-- stima un **volamp** prudente
-- genera `run_processing.sh`
-
-### Metriche supportate
-- **`lra`** → dinamica temporale (EBU R128 Loudness Range)
-- **`delta`** → bilanciamento surround/centro: `Delta = I(SUR) - I(FC)`
-
-### Utilizzo
 ```bash
-./audio_analyzer_volamp.sh <file|""> [probe|lra|delta] [codec] [keep] [bitrate]
+ffmpeg -version
+ffprobe -version
+bash --version
 ```
 
-### Esempi
+---
+
+## Script inclusi
+
+Questa versione del README è allineata ai nomi degli script attuali:
+
+| Script | Scopo |
+|---|---|
+| `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, genera sempre `run_processing.sh` se trova risultati validi |
+| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset psicoacustici e `volamp` finale opzionale |
+| `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 V7, tarato per crossover AVR 110-120 Hz |
+| `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie, ASMR, VR e sorgenti intime |
+| `atmos_to_51_dynaudnorm_volamp_psicho.sh` | Conversione EAC3 Atmos/JOC → EAC3 5.1 DynNorm + traccia Atmos originale preservata |
+
+> Nota naming: il file Atmos attuale si chiama `psicho` e non `psycho`. Il README usa il nome reale del file, perché Bash non perdona i refusi e non ha mai avuto senso dell'umorismo.
+
+---
+
+## Workflow rapido
+
+### File 5.1 già esistente
+
 ```bash
-./audio_analyzer_volamp.sh "episodio.mkv" probe
-./audio_analyzer_volamp.sh "episodio.mkv" delta
-./audio_analyzer_volamp.sh "" delta
-./audio_analyzer_volamp.sh "" delta eac3 no 448k
+./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 no 768k
 ./run_processing.sh
 ```
 
-> Nota: il quarto parametro opzionale è `keep`, quindi se vuoi specificare il bitrate devi passare anche `si` oppure `no`.
+### Intera cartella con file 5.1
 
----
-
-## 🔊 2) `aegis_sonar_wide_aura_voice_volamp.sh`
-
-Motore di processing per tracce **5.1 già esistenti**.
-
-Caratteristiche principali:
-
-- preset `aegis | sonar | wide | aura | voice`
-- supporto a **volamp finale opzionale**
-- `keep=si|no` per mantenere o meno la traccia originale
-- selezione stream score-based
-- gestione coerente dei layout `5.1`, `5.1(back)`, `5.1(side)`
-
-### Utilizzo
 ```bash
-./aegis_sonar_wide_aura_voice_volamp.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
+./audio_analyzer_volamp_psycho.sh "" eac3 no 768k
+./run_processing.sh
 ```
 
-### Esempi
+### Solo 2-3 file campione
+
 ```bash
-./aegis_sonar_wide_aura_voice_volamp.sh eac3 no "film.mkv" 768k sonar 1.5
-./aegis_sonar_wide_aura_voice_volamp.sh eac3 no "film.mkv" 768k wide 0
-./aegis_sonar_wide_aura_voice_volamp.sh ac3 si "film.mkv" 640k voice 2
+./audio_analyzer_volamp_psycho.sh --files eac3 no 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
+./run_processing.sh
 ```
 
----
+### Stereo → 5.1 → analisi → processing
 
-## 🔁 3) `stereo251_upmix.sh`
-
-Converte tracce stereo in 5.1 con:
-
-- estrazione del canale centrale
-- derivazione LFE dedicata
-- surround decorrelati con effetto Haas
-- due preset: `modern` e `vintage`
-
-### Utilizzo
 ```bash
-./stereo251_upmix.sh <ac3|eac3> <si|no> [file|""] [bitrate] [modern|vintage]
+./stereo251_upmix_psycho.sh eac3 no "film_stereo.mkv" 448k modern
+./audio_analyzer_volamp_psycho.sh "film_stereo_UPMIX_5.1_V7_MODERN.mkv" eac3 no 768k
+./run_processing.sh
 ```
 
-### Esempi
+### Atmos/EAC3 → 5.1 DynNorm + Atmos originale
+
 ```bash
-./stereo251_upmix.sh eac3 no "film_stereo.mkv" 448k modern
-./stereo251_upmix.sh ac3 si "" 640k vintage
+./atmos_to_51_dynaudnorm_volamp_psicho.sh "film_atmos.mkv" 768k
 ```
 
 ---
 
-## 🎧 4) `asmr_vr_intimate.sh`
+## 1) `audio_analyzer_volamp_psycho.sh`
 
-Processing stereo dedicato a cuffie, ASMR, VR e contenuti ravvicinati.
+Analyzer principale per tracce **5.1**. La metrica unica è ora **DELTA**:
 
-Include:
-
-- crossfeed **BS2B J. Meier**
-- ITD
-- EQ psicoacustico
-- target LUFS per preset
-- keep originale opzionale
-- LFO opzionale
-- codec/bitrate configurabili
-
-### Utilizzo
-```bash
-./asmr_vr_intimate.sh [opzioni] <file1> [file2 ...]
-```
-
-### Opzioni principali
 ```text
--o <dir>    Cartella output
--d <mode>   whisper | near | center
--k          Mantieni originale come seconda traccia
--l          Attiva Breathing LFO
--c <codec>  aac | opus | flac
--b <rate>   bitrate output
--f          Forza overwrite
--h          Help
+Delta = I(SUR) - I(FC)
 ```
+
+Dove:
+
+- `I(FC)` è la loudness integrata del centrale;
+- `I(SUR)` è la media energetica dei surround SL/SR oppure BL/BR;
+- valori più negativi indicano surround più arretrati rispetto al parlato.
+
+L'analyzer:
+
+- seleziona la traccia 5.1 migliore con score su canali, default e lingua italiana;
+- misura `I(FC)`, `I(SL)`, `I(SR)`, `I(SUR)`, `Delta`, `I(full)`, `LRA` e `Width MS`;
+- usa `Delta` per scegliere il preset;
+- usa la loudness integrata per stimare `volamp`;
+- usa la LRA solo come protezione per limitare `volamp` quando il mix è basso ma molto dinamico;
+- usa P25 come verdetto stagionale, con bias verso gli episodi con surround più deboli;
+- se lo spread supera 4 dB, genera preset per-file;
+- genera sempre `run_processing.sh` quando trova almeno un risultato valido.
+
+### Sintassi
+
+```bash
+./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate]
+./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]
+```
+
+### Parametri
+
+| Parametro | Valori | Default | Note |
+|---|---|---:|---|
+| `file|directory|""` | file, directory o stringa vuota | obbligatorio | `""` analizza la cartella corrente |
+| `codec` | `eac3`, `ac3` | `eac3` | codec usato nel batch generato |
+| `keep` | `si`, `no` | `no` | mantiene o meno la traccia originale nel processing finale |
+| `bitrate` | es. `448k`, `640k`, `768k` | `448k` | accetta anche numeri senza `k` |
+
+### Esempi
+
+```bash
+./audio_analyzer_volamp_psycho.sh "film.mkv"
+./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k
+./audio_analyzer_volamp_psycho.sh "" eac3 no 448k
+./audio_analyzer_volamp_psycho.sh . eac3 si 768k
+./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
+```
+
+### Mappa Delta → preset
+
+| Delta | Preset | Interpretazione |
+|---:|---|---|
+| `< -15 dB` | `sonar` | surround molto deboli, ricostruzione psicoacustica |
+| `-15 / -10 dB` | `aura` | surround deboli, allargamento prudente |
+| `-10 / -6 dB` | `wide` | surround medi, scena laterale |
+| `-6 / -2 dB` | `aegis` | surround buoni, controllo e bilanciamento |
+| `> -2 dB` | `voice` | surround forti o centrale coperto, priorità voce |
+
+### `run_processing.sh`
+
+Il batch generato contiene comandi di questo tipo:
+
+```bash
+"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 1.5
+```
+
+Il valore finale numerico è il `volamp` consigliato per-file.
 
 ---
 
-## 🌩️ 5) `atmos_to_51_dynaudnorm_volamp.sh`
+## 2) `aegis_sonar_wide_aura_voice_volamp_psycho.sh`
 
-Prende un file con traccia **EAC3 Atmos (JOC)** e produce un file di lavoro dual-track con:
+Motore principale per tracce **5.1 esistenti**.
 
-- **Traccia 1**: `EAC3 5.1` standard con **dynaudnorm**
-- **Traccia 2**: `EAC3 Atmos originale` in copia bit-perfect
+Fa processing su centrale e surround, mantenendo FL/FR e LFE il più possibile coerenti con il mix sorgente. È tarato per sistemi small/satellite con crossover intorno a **110-120 Hz**, quindi l'EQ del centrale evita il classico fango da dialogo impastato. L'umanità forse non è perduta, almeno finché taglia il centrale con criterio.
 
-Serve come stadio di preparazione quando parti da materiale Atmos ma vuoi lavorare in modo controllato sul core 5.1.
+### Caratteristiche
 
-### Utilizzo
+- codec output `ac3` oppure `eac3`;
+- preset `aegis`, `sonar`, `wide`, `aura`, `voice`;
+- `volamp` finale opzionale da `0` a `2.5 dB`, applicato prima del limiter;
+- selezione stream score-based: 6 canali, default, lingua italiana;
+- layout gestiti: `5.1`, `5.1(back)`, `5.1(side)`;
+- keep opzionale della traccia audio originale;
+- video, sottotitoli, capitoli e allegati copiati quando presenti;
+- prompt di overwrite con scelta `s/n/t`.
+
+### Sintassi
+
 ```bash
-./atmos_to_51_dynaudnorm_volamp.sh <file|directory> [bitrate]
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
 ```
 
+### Parametri
+
+| Parametro | Valori | Default | Note |
+|---|---|---:|---|
+| `codec` | `ac3`, `eac3` | obbligatorio | codec audio in uscita |
+| `keep` | `si`, `no` | obbligatorio | conserva la traccia originale come seconda traccia |
+| `file` | file singolo | cartella corrente | se omesso processa i file compatibili nella directory |
+| `bitrate` | es. `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza suffisso |
+| `preset` | `aegis`, `sonar`, `wide`, `aura`, `voice` | `sonar` | modalità surround |
+| `volamp` | `0` - `2.5` | `0` | gain finale in dB prima del limiter |
+
 ### Esempi
+
 ```bash
-./atmos_to_51_dynaudnorm_volamp.sh film.mkv
-./atmos_to_51_dynaudnorm_volamp.sh film.mkv 768k
-./atmos_to_51_dynaudnorm_volamp.sh /path/to/folder
-./atmos_to_51_dynaudnorm_volamp.sh . 768k
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k sonar 1.5
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k wide 0
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 si "film.mkv" 640k voice 2
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no
 ```
 
 ### Output
+
+```text
+<nome>_EAC3_Sonar.mkv
+<nome>_EAC3_Aegis.mkv
+<nome>_EAC3_Wide.mkv
+<nome>_EAC3_Aura.mkv
+<nome>_EAC3_Voice.mkv
+```
+
+La forma cambia in base a codec e preset.
+
+---
+
+## 3) `stereo251_upmix_psycho.sh`
+
+Upmix offline da **stereo 2.0 a 5.1**, versione **V7 PSY120 Center-Body / Rear-Fill**.
+
+Questa versione corregge il problema classico degli upmix aggressivi: non ruba la voce ai frontali per metterla tutta nel centrale. FL/FR restano pieni, il centrale diventa un **center-assist** e i surround sono costruiti con doppio motore:
+
+- **side matrix**, quando esiste differenza L/R reale;
+- **rear bed decorrelato dal mid**, utile sui contenuti quasi mono o poco spaziali.
+
+### Caratteristiche
+
+- input stereo 2 canali;
+- output AC3/EAC3 5.1;
+- preset `modern` e `vintage`;
+- centrale tarato per crossover AVR **110-120 Hz**;
+- HP centrale 115/120 Hz e LP dedicato;
+- LFE sintetico prudente;
+- nessun limiter intermedio sui surround;
+- limiter finale post-join;
+- parametri chiave sovrascrivibili via variabili ambiente.
+
+### Sintassi
+
+```bash
+./stereo251_upmix_psycho.sh <ac3|eac3> <si|no> [file|""] [bitrate] [modern|vintage]
+```
+
+### Parametri
+
+| Parametro | Valori | Default | Note |
+|---|---|---:|---|
+| `codec` | `ac3`, `eac3` | obbligatorio | codec in uscita |
+| `keep` | `si`, `no` | obbligatorio | conserva la traccia stereo originale |
+| `file` | file o `""` | cartella corrente | se omesso o vuoto processa la directory corrente |
+| `bitrate` | es. `448k`, `640k`, `768k`, `512` | `448k` | normalizza `512` in `512k` |
+| `preset` | `modern`, `vintage` | `modern` | carattere dei surround |
+
+### Preset
+
+| Preset | Uso consigliato |
+|---|---|
+| `modern` | rear più presenti, ariosi e decorrelati |
+| `vintage` | rear più morbidi, ritardati, stile Pro Logic evoluto |
+
+### Esempi
+
+```bash
+./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k modern
+./stereo251_upmix_psycho.sh ac3 si "" 640k vintage
+./stereo251_upmix_psycho.sh eac3 no
+```
+
+### Tuning via variabili ambiente
+
+Puoi ritoccare il comportamento senza modificare lo script:
+
+```bash
+FC_VOL=0.84 FC_MIX=0.38 ./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k modern
+```
+
+Esempi utili:
+
+| Variabile | Effetto |
+|---|---|
+| `FC_VOL` | volume del centrale |
+| `FC_MIX` | quantità di mid mono mandata al centrale |
+| `FC_HP` | high-pass del centrale |
+| `FC_LP` | low-pass del centrale |
+| `SUR_VOL` | volume componente side dei surround |
+| `SUR_BED_VOL` | volume del rear bed decorrelato |
+| `SUR_DELAY` | ritardo della componente surround |
+| `LFE_VOL` | quantità di LFE sintetico |
+
+### Output
+
+```text
+<nome>_UPMIX_5.1_V7_MODERN.mkv
+<nome>_UPMIX_5.1_V7_VINTAGE.mkv
+```
+
+---
+
+## 4) `asmr_vr_intimate_psycho.sh`
+
+Processing stereo per cuffie, ASMR, VR e contenuti ravvicinati.
+
+Integra:
+
+- crossfeed **BS2B J. Meier**;
+- ITD, Interaural Time Difference;
+- EQ psicoacustico di prossimità;
+- loudnorm per target LUFS coerente con il preset;
+- LFO opzionale tipo “breathing”; 
+- output `aac`, `opus` o `flac`;
+- keep opzionale della traccia originale.
+
+### Sintassi
+
+```bash
+./asmr_vr_intimate_psycho.sh [opzioni] <file1> [file2 ...]
+```
+
+### Opzioni
+
+```text
+-o <dir>     Cartella output, default: stessa del file
+-d <mode>    whisper | near | center
+-k           Mantieni audio originale come seconda traccia
+-l           Attiva Breathing LFO
+-c <codec>   aac | opus | flac
+-b <rate>    bitrate output, default 320k, ignorato con flac
+-f           Forza overwrite senza chiedere
+-h           Mostra help
+```
+
+### Preset
+
+| Preset | Target | Descrizione |
+|---|---:|---|
+| `whisper` | `-20 LUFS` | massima intimità, sussurri a 20-30 cm |
+| `near` | `-19 LUFS` | voce vicina ma non sussurrata, 30-50 cm |
+| `center` | `-18 LUFS` | sorgente frontale, spazializzazione leggera |
+
+### Esempi
+
+```bash
+./asmr_vr_intimate_psycho.sh -d whisper -c aac -b 320k "asmr.mkv"
+./asmr_vr_intimate_psycho.sh -d near -k -l -o output "clip01.mkv" "clip02.mkv"
+./asmr_vr_intimate_psycho.sh -d center -c flac "voce.wav"
+```
+
+### Output
+
+```text
+<nome>_INTIMATE_WHISPER.mkv
+<nome>_INTIMATE_NEAR.mkv
+<nome>_INTIMATE_CENTER.mkv
+```
+
+---
+
+## 5) `atmos_to_51_dynaudnorm_volamp_psicho.sh`
+
+Prepara materiale **EAC3 Atmos/JOC** per il workflow 5.1.
+
+Produce un MKV dual-track:
+
+1. **EAC3 5.1 Dynamic Normalized**, ottenuta decodificando il bed 5.1 e applicando `dynaudnorm` prudente;
+2. **EAC3 Atmos originale**, copiata bit-perfect.
+
+FFmpeg non renderizza gli oggetti Atmos come un AVR: decodifica il bed multicanale. Questo script lo normalizza a `5.1(side)`, applica `dynaudnorm` con `coupling=1` e preserva la traccia Atmos originale per sicurezza. Per una volta, prudenza e utilità nella stessa stanza.
+
+### Sintassi
+
+```bash
+./atmos_to_51_dynaudnorm_volamp_psicho.sh <file|directory|""> [bitrate]
+```
+
+### Parametri
+
+| Parametro | Valori | Default | Note |
+|---|---|---:|---|
+| `file|directory|""` | file, directory o stringa vuota | obbligatorio | `""` usa la cartella corrente |
+| `bitrate` | es. `640k`, `768k` | `640k` | bitrate della traccia EAC3 5.1 generata |
+
+### Dynaudnorm usato
+
+```text
+dynaudnorm=framelen=500:gausssize=31:peak=0.92:maxgain=4:targetrms=0:compress=0:coupling=1:altboundary=0
+```
+
+Questa configurazione è conservativa:
+
+- `peak=0.92` lascia headroom;
+- `maxgain=4` evita boost assurdi su silenzi e code;
+- `targetrms=0` disabilita il target RMS;
+- `compress=0` evita compressione aggiuntiva;
+- `coupling=1` preserva l'immagine surround applicando lo stesso gain ai canali.
+
+### Esempi
+
+```bash
+./atmos_to_51_dynaudnorm_volamp_psicho.sh "film.mkv"
+./atmos_to_51_dynaudnorm_volamp_psicho.sh "film.mkv" 768k
+./atmos_to_51_dynaudnorm_volamp_psicho.sh /path/to/folder
+./atmos_to_51_dynaudnorm_volamp_psicho.sh . 768k
+./atmos_to_51_dynaudnorm_volamp_psicho.sh "" 768k
+```
+
+### Output
+
 ```text
 <nome>_EAC3_51_DynNorm.mkv
 ```
 
-con:
+Con tracce:
 
-- Traccia 1: `EAC3 5.1 – Dynamic Normalized`
-- Traccia 2: `EAC3 Atmos (Original)`
-
-> Nota importante: in questa suite ridotta il workflow Atmos si ferma qui come stadio dedicato. Il processing successivo è centrato sulla traccia 5.1. Se vuoi mantenere anche la traccia Atmos nel file finale dopo il processing, quella parte va gestita separatamente.
+```text
+Traccia 1: EAC3 5.1 – Dynamic Normalized
+Traccia 2: EAC3 Atmos (Original)
+```
 
 ---
 
-## 🔊 Volamp heuristic
+## Preset 5.1
 
-L’analyzer stima un **boost finale prudente** guardando la Loudness Integrata del file intero.
+| Preset | Filosofia | Quando usarlo |
+|---|---|---|
+| `voice` | dialoghi in primo piano, surround attenuati | centrale coperto o surround troppo forti |
+| `aura` | allargamento prudente e morbido | surround deboli ma non morti |
+| `wide` | scena laterale più ampia | surround medi, serve più apertura |
+| `aegis` | cupola controllata, bilanciamento | surround già buoni ma da rifinire |
+| `sonar` | ricostruzione psicoacustica più energica | surround molto deboli o scena piatta |
 
-Step correnti:
+---
+
+## Volamp
+
+`volamp` è un gain finale prudente applicato dal processore **prima del limiter**.
+
+L'analyzer lo stima usando la loudness integrata del file intero, ma limita il valore quando la LRA è alta, perché un mix cinematografico basso e dinamico non è automaticamente un file “da pompare”. Scandaloso, lo so: rispettare la dinamica.
+
+Step usati:
 
 ```text
 0 dB   -> nessun incremento necessario
@@ -245,178 +493,201 @@ Step correnti:
 2.5 dB -> boost massimo prudente
 ```
 
-Il processore applica questo gain finale **prima** del limiter.
+Esempio manuale:
+
+```bash
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k sonar 1.5
+```
 
 ---
 
-## 🗺️ Diagramma pipeline
+## Diagrammi pipeline
 
 ### Workflow 5.1 standard
 
 ```mermaid
 flowchart LR
-    A[File con traccia 5.1] --> B[audio_analyzer_volamp.sh]
-    B --> C[Scelta preset + volamp]
+    A[File con traccia 5.1] --> B[audio_analyzer_volamp_psycho.sh]
+    B --> C[Delta + preset + volamp]
     C --> D[run_processing.sh]
-    D --> E[aegis_sonar_wide_aura_voice_volamp.sh]
-    E --> F[Output finale AC3 / EAC3 processato]
+    D --> E[aegis_sonar_wide_aura_voice_volamp_psycho.sh]
+    E --> F[Output AC3/EAC3 processato]
+```
+
+### Workflow lista manuale
+
+```mermaid
+flowchart LR
+    A[2-3 episodi campione] --> B[audio_analyzer --files]
+    B --> C[Preset stagionale o per-file]
+    C --> D[run_processing.sh]
+    D --> E[Processing mirato]
 ```
 
 ### Workflow stereo → 5.1
 
 ```mermaid
 flowchart LR
-    A[File stereo] --> B[stereo251_upmix.sh]
-    B --> C[File 5.1 upmixato]
-    C --> D[audio_analyzer_volamp.sh]
+    A[File stereo 2.0] --> B[stereo251_upmix_psycho.sh]
+    B --> C[File 5.1 upmixato V7]
+    C --> D[audio_analyzer_volamp_psycho.sh]
     D --> E[run_processing.sh]
-    E --> F[aegis_sonar_wide_aura_voice_volamp.sh]
-    F --> G[Output finale 5.1 processato]
+    E --> F[aegis/sonar/wide/aura/voice]
+    F --> G[Output finale 5.1]
 ```
 
-### Workflow Atmos ridotto
+### Workflow Atmos/EAC3
 
 ```mermaid
 flowchart LR
-    A[File EAC3 Atmos] --> B[atmos_to_51_dynaudnorm_volamp.sh]
-    B --> C[Dual-track di lavoro: 5.1 DynNorm + Atmos originale]
-    C --> D[audio_analyzer_volamp.sh sul file generato]
+    A[File EAC3 Atmos/JOC] --> B[atmos_to_51_dynaudnorm_volamp_psicho.sh]
+    B --> C[MKV dual-track: 5.1 DynNorm + Atmos originale]
+    C --> D[audio_analyzer sul core 5.1]
     D --> E[run_processing.sh]
-    E --> F[aegis_sonar_wide_aura_voice_volamp.sh]
-    F --> G[Output finale centrato sul core 5.1]
+    E --> F[Processing 5.1]
+```
+
+### Workflow ASMR / VR
+
+```mermaid
+flowchart LR
+    A[File stereo] --> B[asmr_vr_intimate_psycho.sh]
+    B --> C[BS2B + ITD + EQ prossimità + loudnorm]
+    C --> D[Output stereo cuffie]
 ```
 
 ---
 
-## 📊 Mini benchmark orientativo
+## Benchmark orientativo
 
-Questo **non è un benchmark scientifico in secondi assoluti**.  
-È una stima pratica della complessità relativa, utile per capire quali script “pesano” di più su CPU e tempo.
+Non è un benchmark scientifico. È una mappa pratica del costo relativo, così sai dove la CPU inizierà a contemplare il sindacato.
 
-| Script | Passaggi / filtri | Costo relativo | Note pratiche |
-|-------|--------------------|----------------|---------------|
-| `audio_analyzer_volamp.sh` | Probe + EBU R128 | Basso / Medio | `delta` costa più di `lra` perché misura FC + SL + SR + full stream |
-| `aegis_sonar_wide_aura_voice_volamp.sh` | Filtergraph 5.1 completo | Alto | È il cuore della suite, qui lavora davvero la CPU |
-| `stereo251_upmix.sh` | Upmix + limiter | Medio | Più leggero del processing 5.1 completo |
-| `asmr_vr_intimate.sh` | Stereo DSP + loudnorm + BS2B | Medio | Meno pesante del 5.1, ma non banale |
-| `atmos_to_51_dynaudnorm_volamp.sh` | Decode Atmos core + dynaudnorm + remux | Medio / Alto | Dipende molto dalla durata del file |
+| Script | Costo relativo | Note |
+|---|---:|---|
+| `audio_analyzer_volamp_psycho.sh` | Medio | misura più canali con EBU R128, quindi non è gratis |
+| `stereo251_upmix_psycho.sh` | Medio | upmix + filtri + encoding audio |
+| `asmr_vr_intimate_psycho.sh` | Medio | loudnorm, BS2B, EQ e limiter stereo |
+| `atmos_to_51_dynaudnorm_volamp_psicho.sh` | Medio/Alto | decode EAC3/Atmos bed + dynaudnorm + re-encode EAC3 |
+| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Alto | filtergraph 5.1 completo, cuore pesante della suite |
 
-### Ordine indicativo di “peso”
-Dal più leggero al più pesante:
+Ordine indicativo dal più leggero al più pesante:
 
 ```text
-audio_analyzer (lra)
-audio_analyzer (delta)
-stereo251_upmix
-asmr_vr_intimate
-atmos_to_51_dynaudnorm_volamp
-aegis_sonar_wide_aura_voice_volamp
-```
-
-### Osservazione pratica
-Se devi processare una stagione intera:
-
-- il collo di bottiglia principale è quasi sempre `aegis_sonar_wide_aura_voice_volamp.sh`
-- `delta` è la misura più utile, ma costa più di `lra`
-- `stereo251_upmix.sh` conviene usarlo solo dove serve davvero
-- `atmos_to_51_dynaudnorm_volamp.sh` è un ottimo pre-step, ma è comunque una ricodifica audio vera
-
----
-
-## 🧪 Workflow consigliati
-
-### Workflow A — File 5.1 normali
-```bash
-./audio_analyzer_volamp.sh "" delta eac3 no 768k
-./run_processing.sh
-```
-
-### Workflow B — Stereo → 5.1 → processing finale
-```bash
-./stereo251_upmix.sh eac3 no "" 448k modern
-./audio_analyzer_volamp.sh "" delta eac3 no 768k
-./run_processing.sh
-```
-
-### Workflow C — Atmos → dual-track di lavoro
-```bash
-./atmos_to_51_dynaudnorm_volamp.sh film.mkv 768k
-```
-
-### Workflow D — Singolo file, controllo manuale
-```bash
-./audio_analyzer_volamp.sh "episodio.mkv" delta
-./aegis_sonar_wide_aura_voice_volamp.sh eac3 no "episodio.mkv" 768k sonar 1.5
+audio_analyzer_volamp_psycho
+stereo251_upmix_psycho
+asmr_vr_intimate_psycho
+atmos_to_51_dynaudnorm_volamp_psicho
+aegis_sonar_wide_aura_voice_volamp_psycho
 ```
 
 ---
 
-## 🚫 Cosa questi script NON fanno
-
-- non rifanno il mix cinematografico da zero
-- non sostituiscono la calibrazione ambientale
-- non usano AI o DSP opachi
-- non promettono “Atmos vero” su catene che Atmos vero non possono renderizzare
-- non reinventano la fisica
-
----
-
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Lo script non parte
+
 ```bash
 chmod +x *.sh
 ffmpeg -version
 ffprobe -version
 ```
 
-### Il batch punta allo script sbagliato
-Controlla che il batch generato usi:
+Su Windows/MSYS2 verifica anche:
 
 ```bash
-PROC="./aegis_sonar_wide_aura_voice_volamp.sh"
+which ffmpeg
+which ffprobe
+which awk
 ```
 
-### Vuoi lavorare su materiale Atmos
-Prima genera il dual-track con:
+### `run_processing.sh` punta allo script sbagliato
+
+Controlla questa riga dentro `run_processing.sh`:
 
 ```bash
-./atmos_to_51_dynaudnorm_volamp.sh file.mkv
+PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"
 ```
 
-Poi ragiona sul core 5.1 generato.
+Se serve, correggila manualmente.
 
-### Errore comune nell’analyzer
-Questo **non** va bene:
+### Voglio analizzare solo alcuni episodi, non tutta la cartella
 
 ```bash
-./audio_analyzer_volamp.sh file.mkv delta eac3 448k
+./audio_analyzer_volamp_psycho.sh --files eac3 no 768k "ep01.mkv" "ep04.mkv" "ep08.mkv"
+./run_processing.sh
 ```
 
-Perché `448k` viene interpretato come parametro `keep`.
+### Il file è stereo, non 5.1
 
-Usa invece:
+Prima fai upmix:
 
 ```bash
-./audio_analyzer_volamp.sh file.mkv delta eac3 no 448k
+./stereo251_upmix_psycho.sh eac3 no "film_stereo.mkv" 448k modern
 ```
 
-oppure:
+Poi analizza il file generato.
+
+### Il file è Atmos/EAC3
+
+Prima prepara il dual-track:
 
 ```bash
-./audio_analyzer_volamp.sh file.mkv delta eac3 si 448k
+./atmos_to_51_dynaudnorm_volamp_psicho.sh "film_atmos.mkv" 768k
 ```
+
+Poi lavora sul core 5.1 generato.
+
+### Il centrale dell'upmix ruba scena
+
+Abbassa prima `FC_VOL` o `FC_MIX`, non i frontali:
+
+```bash
+FC_VOL=0.82 FC_MIX=0.36 ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k modern
+```
+
+### I surround dell'upmix sono troppo timidi
+
+Aumenta leggermente `SUR_VOL` o `SUR_BED_VOL`:
+
+```bash
+SUR_VOL=1.24 SUR_BED_VOL=0.32 ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k modern
+```
+
+### Output già esistente
+
+Gli script principali chiedono conferma:
+
+```text
+[s/n/t]
+```
+
+Dove:
+
+- `s` sovrascrive il singolo file;
+- `n` salta;
+- `t` sovrascrive tutti i successivi.
 
 ---
 
-## 📄 Licenza
+## Cosa questi script NON fanno
 
-License MIT
+- non creano Atmos reale da materiale non Atmos;
+- non sostituiscono calibrazione AVR, distanza casse e livelli corretti;
+- non rifanno il mix cinematografico da zero;
+- non promettono miracoli su sorgenti massacrate;
+- non usano AI o DSP opachi;
+- non reinventano la fisica, anche se a volte FFmpeg ci prova.
 
 ---
 
-## 👤 Autore
+## Licenza
+
+MIT License
+
+---
+
+## Autore
 
 **Sandro (D@mocle77) Sabbioni**
 
-> *Per riportare ordine nella Forza Sonora serve solo uno script Bash.*
+> Per riportare ordine nella Forza Sonora serve solo uno script Bash. E una tolleranza patologica verso i log di FFmpeg.
