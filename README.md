@@ -17,7 +17,7 @@ Pensata per AVR usati in modalità **Straight / Pure / Direct**, con particolare
 - gestione prudente del loudness tramite `volamp`;
 - workflow batch per stagioni, film e cartelle intere.
 
-> Non tutti i supereroi indossano un mantello. Alcuni litigano con `filter_complex`.
+> Non tutti i supereroi indossano un mantello. Alcuni utilizzano `filter_complex`.
 
 ---
 
