@@ -30,7 +30,6 @@ Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione 
 - [Requisiti](#requisiti)
 - [Installazione](#installazione)
 - [Script inclusi](#script-inclusi)
-- [Workflow rapido](#workflow-rapido)
 - [1. Analyzer 5.1 Delta / Volamp](#1-audio_analyzer_volamp_psychosh)
 - [2. Processing 5.1 Aegis / Sonar / Wide / Aura / Voice](#2-aegis_sonar_wide_aura_voice_volamp_psychosh)
 - [3. Upmix stereo → 5.1 TO51 / QUAD](#3-stereo251_upmix_psychosh)
