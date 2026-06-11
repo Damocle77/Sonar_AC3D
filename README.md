@@ -8,7 +8,7 @@ Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracc
 
 L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare solo il processing necessario**. Niente DSP opaco, niente pulsanti “enhance” usciti da un film poliziesco del 2003. Solo FFmpeg, euristiche dichiarate e preset psicoacustici ragionati.
 
-La suite è tarata in modo particolare per un setup li livello medio **JBL SCS200 + AVR Yamaha RX + Subwoofer Attivo Kenwood**, diffusori Small, crossover AVR intorno a **100 Hz**, ascolto domestico a volume medio/basso e priorità all'intelligibilità della voce italiana.
+La suite è tarata in modo particolare per un setup li livello medio **JBL SCS200 + AVR Yamaha RX + Subwoofer Active Kenwood**, diffusori Small, crossover AVR intorno a **100 Hz**, ascolto domestico a volume medio/basso e priorità all'intelligibilità della voce italiana.
 
 Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione a:
 
