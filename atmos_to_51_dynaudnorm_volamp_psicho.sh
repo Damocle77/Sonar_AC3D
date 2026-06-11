@@ -16,7 +16,7 @@
 # │                                                                              │
 # │   PARAMETRI:                                                                 │
 # │     file    : File sorgente (mkv/mp4/m2ts), directory da processare          │
-# │               oppure "" per batch nella cartella corrente.                    │
+# │               oppure "" per batch nella cartella corrente.                   │
 # │     bitrate : Bitrate traccia 5.1 (default: 640k).                           │
 # │                                                                              │
 # │   DIPENDENZE: ffmpeg, ffprobe (con supporto EAC3 JOC)                        │
@@ -108,7 +108,7 @@ BITRATE="${2:-640k}"
 # Versione prudente: stabilizza senza riscrivere la dinamica.
 # peak=0.92  : piu' headroom prima di eventuali processing successivi
 # maxgain=4  : evita boost eccessivi su silenzi/code/ambienti molto bassi
-DYNAUDNORM="dynaudnorm=framelen=500:gausssize=31:peak=0.92:maxgain=4:targetrms=0:compress=0:coupling=1:altboundary=0"
+DYNAUDNORM="highpass=f=20:t=q:w=0.707,dynaudnorm=framelen=500:gausssize=31:peak=0.92:maxgain=4:targetrms=0:compress=0:coupling=1:altboundary=0"
 
 # ── Probe: trova traccia EAC3 Atmos (JOC) ────────────────────────────────────
 # Cerchiamo specificamente eac3 con atmos_information oppure joc_complexity > 0.

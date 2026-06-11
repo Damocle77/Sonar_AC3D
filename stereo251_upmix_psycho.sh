@@ -3,18 +3,19 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   stereo251_upmix.sh - V7 PSY120 CENTER-BODY / REAR-FILL - Aprile 2026            │
+# │   stereo251_upmix.sh -  TO51 / QUAD - PSYCHO - Giugno 2026                   │
 # │                                                                              │
 # │   Motore di upmix offline da Stereo a 5.1 (EAC3/AC3),                        │
-# │   tarato per AVR/casse con crossover intorno a 110-120Hz.                   │
+# │   tarato per JBL SCS200 + AVR Yamaha con crossover globale a 100 Hz.         │
 # │                                                                              │
-# │   Filosofia V7:                                                              │
-# │     - Non sottrae voce ai frontali: FL/FR restano a livello pieno.            │
-# │     - FC come ancoraggio: piu' corpo con crossover 110-120, non protagonista.│
-# │     - FC filtrato: HP 115/120Hz, LP dedicato, medio-basso controllato.       │
-# │     - Surround a doppio motore: side matrix + rear bed decorrelato dal mid.  │
-# │     - Nessun limiter intermedio sui surround: solo limiter finale post-join. │
-# │     - Parametri chiave sovrascrivibili via variabili ambiente.               │
+# │   Filosofia:                                                                 │
+# │     - Due soli preset operativi: to51 e quad.                                │
+# │     - FL/FR restano pieni: il phantom center originale non viene sabotato.   │
+# │     - FC come assist filtrato a 102 Hz, non sostituto dei frontali.          │
+# │     - LFE sintetico molto prudente: l'AVR fa già bass management.            │
+# │     - Rear filtrati per non far parlare gli attori dietro la testa.          │
+# │     - Psicoacustica leggera: delay Haas + allpass/air a basso livello.       │
+# │     - Master limiter finale con upsample 192 kHz per contenere true peaks.   │
 # ╰──────────────────────────────────────────────────────────────────────────────╯
 
 C_INFO="\033[0;36m[INFO]\033[0m"
@@ -34,28 +35,32 @@ done
 usage() {
   cat <<'USAGE'
 UTILIZZO:
-  ./stereo251_upmix_v7_psy120_center_body.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
+  ./stereo251_upmix_psycho.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
 
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
   si|no     : Conserva traccia stereo originale come secondaria.
   file      : Nome del file, oppure "" per batch sulla cartella corrente.
   bitrate   : Es. 448k, 640k, 768k, 448K, 512 (default: 448k).
-  preset    : modern  (default) Rear piu' presenti, ariosi, decorrelati.
-              vintage Rear piu' morbidi, ritardati, stile Pro Logic.
+  preset    : to51  (default) Upmix 2.0 -> 5.1 controllato, cinema domestico.
+              quad  Quadrifonia ponderata, naturale e meno invasiva.
 
-TUNING RAPIDO VIA ENV, senza editare lo script:
-  FC_VOL=0.88 FC_HP=120 FC_MIX=0.42 ./stereo251_upmix_v7_psy120_center_body.sh eac3 no 'movie.mkv' 448k modern
+PRESET:
+  to51:
+    - FL/FR pieni.
+    - FC assist, filtrato e controllato.
+    - Surround da side-matrix L-R + rear-bed psicoacustico leggero.
+    - Migliore per film/serie/anime stereo larghi o action.
 
-NOTE:
-  V7 evita il problema della V4: non abbassa FL/FR per "fare spazio" al centro.
-  Il centrale e' un center-assist piu' corposo, tarato per crossover AVR 110-120Hz.
-  Se ruba scena, abbassa FC_VOL o FC_MIX prima di toccare i frontali.
+  quad:
+    - FL -> SL e FR -> SR con delay Haas, banda limitata e volume prudente.
+    - FC e LFE molto leggeri.
+    - Migliore per concerti, TV stereo, anime/film vecchi, materiale mono-ish.
 
 ESEMPI:
-  ./stereo251_upmix_v7_psy120_center_body.sh eac3 no 'movie.mkv' 448k modern
-  ./stereo251_upmix_v7_psy120_center_body.sh ac3 si '' 640k vintage
-  ./stereo251_upmix_v7_psy120_center_body.sh eac3 no
+  ./stereo251_upmix_psycho_V8_to51_quad.sh eac3 no 'movie.mkv' 448k to51
+  ./stereo251_upmix_psycho_V8_to51_quad.sh eac3 si 'concert.mkv' 640k quad
+  ./stereo251_upmix_psycho_V8_to51_quad.sh ac3 no "" 448k to51
 USAGE
   exit 1
 }
@@ -66,11 +71,11 @@ OUT_CODEC="${1:-}"
 KEEP_STEREO="${2:-no}"
 INPUT_FILE="${3:-}"
 BITRATE="${4:-448k}"
-MODE="${5:-modern}"
+MODE="${5:-to51}"
 
 case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1;; esac
 [[ "$KEEP_STEREO" =~ ^(si|no)$ ]] || { err "Parametro 2 deve essere 'si' o 'no'"; exit 1; }
-case "$MODE" in modern|vintage) ;; *) err "Preset '$MODE' non valido. Usa modern o vintage."; exit 1;; esac
+case "$MODE" in to51|quad) ;; *) err "Preset '$MODE' non valido. Usa to51 o quad."; exit 1;; esac
 
 # Normalizza bitrate: accetta 448, 448k, 448K, 1M.
 if [[ "$BITRATE" =~ ^([0-9]+)([kKmM]?)$ ]]; then
@@ -166,7 +171,12 @@ fi
 FILTERED_FILES=()
 for f in "${FILES[@]}"; do
   case "$f" in
-    *_UPMIX_5.1_MODERN.mkv|*_UPMIX_5.1_VINTAGE.mkv|*_UPMIX_5.1_PSY160_MODERN.mkv|*_UPMIX_5.1_PSY160_VINTAGE.mkv|*_UPMIX_5.1_V5_MODERN.mkv|*_UPMIX_5.1_V5_VINTAGE.mkv|*_UPMIX_5.1_V6_MODERN.mkv|*_UPMIX_5.1_V6_VINTAGE.mkv|*_UPMIX_5.1_V7_MODERN.mkv|*_UPMIX_5.1_V7_VINTAGE.mkv)
+    *_UPMIX_5.1_MODERN.mkv|*_UPMIX_5.1_VINTAGE.mkv|\
+    *_UPMIX_5.1_PSY160_MODERN.mkv|*_UPMIX_5.1_PSY160_VINTAGE.mkv|\
+    *_UPMIX_5.1_V5_MODERN.mkv|*_UPMIX_5.1_V5_VINTAGE.mkv|\
+    *_UPMIX_5.1_V6_MODERN.mkv|*_UPMIX_5.1_V6_VINTAGE.mkv|\
+    *_UPMIX_5.1_V7_MODERN.mkv|*_UPMIX_5.1_V7_VINTAGE.mkv|\
+    *_UPMIX_5.1_V8_TO51.mkv|*_UPMIX_5.1_V8_QUAD.mkv)
       info "Skip output gia' upmixato: $f"
       continue
       ;;
@@ -180,67 +190,146 @@ FILES=("${FILTERED_FILES[@]}")
 (( ${#FILES[@]} == 0 )) && { err "Nessun file trovato da processare."; exit 1; }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Configurazione preset V7
-# Le variabili possono essere sovrascritte dall'ambiente.
+# Configurazione preset V8
+# Defaults interni: non serve esportare variabili prima del lancio.
+# Le variabili sono comunque sovrascrivibili dall'ambiente per debug avanzato.
 # ────────────────────────────────────────────────────────────────────────────────
+FRONT_VOL="${FRONT_VOL:-1.00}"
+
 case "$MODE" in
-  vintage)
-    FRONT_VOL="${FRONT_VOL:-1.00}"
+  to51)
+    # Upmix 2.0 -> 5.1 controllato.
+    # Center assist: presente ma non ruba il phantom center originale.
+    FC_MIX="${FC_MIX:-0.38}"
+    FC_VOL="${FC_VOL:-0.84}"
+    FC_HP="${FC_HP:-102}"
+    FC_LP="${FC_LP:-5800}"
+    FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.9,equalizer=f=620:t=q:w=1.0:g=-0.5,equalizer=f=1750:t=q:w=1.5:g=0.5,equalizer=f=2550:t=q:w=1.25:g=0.8,equalizer=f=3700:t=q:w=1.7:g=0.5,equalizer=f=5800:t=q:w=1.8:g=-0.8}"
 
-    # Center body: un filo piu' corpo della V6, ma senza fango.
-    # Target: casse migliori + crossover AVR 110-120Hz.
-    FC_MIX="${FC_MIX:-0.40}"
-    FC_VOL="${FC_VOL:-0.86}"
-    FC_HP="${FC_HP:-115}"
-    FC_LP="${FC_LP:-5600}"
-    FC_EQ="${FC_EQ:-equalizer=f=280:t=q:w=1.15:g=-1.3,equalizer=f=620:t=q:w=1.0:g=-0.5,equalizer=f=1700:t=q:w=1.5:g=0.5,equalizer=f=2500:t=q:w=1.25:g=0.8,equalizer=f=3600:t=q:w=1.7:g=0.5,equalizer=f=5600:t=q:w=1.8:g=-0.9}"
+    # LFE sintetico molto prudente: il sub riceve gia' bass management dall'AVR.
+    LFE_VOL="${LFE_VOL:-0.10}"
 
-    # LFE sintetico prudente: l'AVR fa gia' bass management, non serve evocare Cthulhu.
-    LFE_VOL="${LFE_VOL:-0.22}"
+    # Rear: side matrix + piccolo rear bed decorrelato.
+    SUR_DELAY="${SUR_DELAY:-18}"
+    SUR_PAN="${SUR_PAN:-0.58}"
+    SUR_VOL="${SUR_VOL:-0.95}"
+    SUR_BED_VOL="${SUR_BED_VOL:-0.16}"
+    BED_DELAY_L="${BED_DELAY_L:-28}"
+    BED_DELAY_R="${BED_DELAY_R:-38}"
 
-    SUR_DELAY="${SUR_DELAY:-26}"
-    SUR_PAN="${SUR_PAN:-0.62}"
-    SUR_VOL="${SUR_VOL:-1.06}"
-    SUR_BED_VOL="${SUR_BED_VOL:-0.24}"
-    BED_DELAY_L="${BED_DELAY_L:-38}"
-    BED_DELAY_R="${BED_DELAY_R:-52}"
-
-    SUR_EQ="highpass=f=130,lowpass=f=6800,equalizer=f=3200:t=q:w=1.6:g=0.4"
-    BED_EQ="highpass=f=200,lowpass=f=5600,equalizer=f=1000:t=q:w=1.2:g=-1.2,equalizer=f=1900:t=q:w=1.4:g=-3.8,equalizer=f=3200:t=q:w=1.6:g=-3.2"
-    MODE_TITLE="V7 Vintage PSY120 Center-Body + Rear-Fill"
+    SUR_EQ="highpass=f=150:t=q:w=0.707,lowpass=f=9000,equalizer=f=5200:t=q:w=1.4:g=0.5,equalizer=f=7200:t=q:w=2.0:g=-0.6"
+    BED_EQ="highpass=f=230:t=q:w=0.707,lowpass=f=6500,equalizer=f=950:t=q:w=1.2:g=-1.2,equalizer=f=1800:t=q:w=1.4:g=-4.0,equalizer=f=3000:t=q:w=1.6:g=-3.4,equalizer=f=5200:t=q:w=1.8:g=0.3"
+    MODE_TITLE="V8 TO51 Psycho Controlled"
     ;;
-  modern)
-    FRONT_VOL="${FRONT_VOL:-1.00}"
 
-    # Center body: piu' pieno della V6, ma ancora da assist e non da protagonista.
-    # Target: casse migliori + crossover AVR 110-120Hz.
-    FC_MIX="${FC_MIX:-0.42}"
-    FC_VOL="${FC_VOL:-0.88}"
-    FC_HP="${FC_HP:-120}"
-    FC_LP="${FC_LP:-6200}"
-    FC_EQ="${FC_EQ:-equalizer=f=280:t=q:w=1.15:g=-1.4,equalizer=f=650:t=q:w=1.0:g=-0.6,equalizer=f=1850:t=q:w=1.5:g=0.6,equalizer=f=2700:t=q:w=1.25:g=1.0,equalizer=f=3900:t=q:w=1.7:g=0.7,equalizer=f=6200:t=q:w=1.8:g=-0.7}"
+  quad)
+    # Quadrifonia ponderata: piu' naturale e meno invasiva.
+    # Center e LFE sono volutamente piu' leggeri.
+    FC_MIX="${FC_MIX:-0.28}"
+    FC_VOL="${FC_VOL:-0.78}"
+    FC_HP="${FC_HP:-102}"
+    FC_LP="${FC_LP:-5200}"
+    FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.7,equalizer=f=650:t=q:w=1.0:g=-0.4,equalizer=f=1800:t=q:w=1.5:g=0.4,equalizer=f=2600:t=q:w=1.25:g=0.6,equalizer=f=3600:t=q:w=1.7:g=0.4,equalizer=f=5200:t=q:w=1.8:g=-0.8}"
 
-    # LFE sintetico prudente: l'AVR fa gia' bass management, non serve evocare Cthulhu.
-    LFE_VOL="${LFE_VOL:-0.22}"
+    LFE_VOL="${LFE_VOL:-0.08}"
 
-    SUR_DELAY="${SUR_DELAY:-16}"
-    SUR_PAN="${SUR_PAN:-0.68}"
-    SUR_VOL="${SUR_VOL:-1.18}"
-    SUR_BED_VOL="${SUR_BED_VOL:-0.28}"
-    BED_DELAY_L="${BED_DELAY_L:-31}"
-    BED_DELAY_R="${BED_DELAY_R:-43}"
-
-    SUR_EQ="highpass=f=125,lowpass=f=9800,equalizer=f=5200:t=q:w=1.4:g=0.9,equalizer=f=7200:t=q:w=2.0:g=-0.6"
-    BED_EQ="highpass=f=190,lowpass=f=6800,equalizer=f=950:t=q:w=1.2:g=-1.0,equalizer=f=1800:t=q:w=1.4:g=-3.6,equalizer=f=3000:t=q:w=1.6:g=-3.2,equalizer=f=5200:t=q:w=1.8:g=0.5"
-    MODE_TITLE="V7 Modern PSY120 Center-Body + Rear-Fill"
+    QUAD_DELAY_L="${QUAD_DELAY_L:-16}"
+    QUAD_DELAY_R="${QUAD_DELAY_R:-19}"
+    QUAD_VOL="${QUAD_VOL:-0.58}"
+    QUAD_HP="${QUAD_HP:-250}"
+    QUAD_LP="${QUAD_LP:-8000}"
+    QUAD_AIR_VOL="${QUAD_AIR_VOL:-0.035}"
+    MODE_TITLE="V8 QUAD Weighted Psycho"
     ;;
 esac
 
 info "Front vol:      ${FRONT_VOL}"
 info "Center:         mix ${FC_MIX}, HP ${FC_HP}Hz, LP ${FC_LP}Hz, vol ${FC_VOL}"
 info "LFE synth:      vol ${LFE_VOL}"
-info "Rear side:      pan ${SUR_PAN}, vol ${SUR_VOL}, delay ${SUR_DELAY}ms"
-info "Rear bed:       vol ${SUR_BED_VOL}, delays ${BED_DELAY_L}/${BED_DELAY_R}ms"
+if [[ "$MODE" == "to51" ]]; then
+  info "Rear side:      pan ${SUR_PAN}, vol ${SUR_VOL}, delay ${SUR_DELAY}ms"
+  info "Rear bed:       vol ${SUR_BED_VOL}, delays ${BED_DELAY_L}/${BED_DELAY_R}ms"
+else
+  info "Rear quad:      vol ${QUAD_VOL}, delay ${QUAD_DELAY_L}/${QUAD_DELAY_R}ms, band ${QUAD_HP}-${QUAD_LP}Hz"
+  info "Rear air:       vol ${QUAD_AIR_VOL}"
+fi
+
+build_to51_filter() {
+  cat <<'FILTER_EOF' | sed \
+    -e "s|__A_STREAM_INDEX__|${A_STREAM_INDEX}|g" \
+    -e "s|__FRONT_VOL__|${FRONT_VOL}|g" \
+    -e "s|__FC_MIX__|${FC_MIX}|g" \
+    -e "s|__FC_HP__|${FC_HP}|g" \
+    -e "s|__FC_LP__|${FC_LP}|g" \
+    -e "s|__FC_EQ__|${FC_EQ}|g" \
+    -e "s|__FC_VOL__|${FC_VOL}|g" \
+    -e "s|__LFE_VOL__|${LFE_VOL}|g" \
+    -e "s|__SUR_PAN__|${SUR_PAN}|g" \
+    -e "s|__SUR_DELAY__|${SUR_DELAY}|g" \
+    -e "s|__SUR_EQ__|${SUR_EQ}|g" \
+    -e "s|__SUR_VOL__|${SUR_VOL}|g" \
+    -e "s|__BED_DELAY_L__|${BED_DELAY_L}|g" \
+    -e "s|__BED_DELAY_R__|${BED_DELAY_R}|g" \
+    -e "s|__BED_EQ__|${BED_EQ}|g" \
+    -e "s|__SUR_BED_VOL__|${SUR_BED_VOL}|g"
+[0:__A_STREAM_INDEX__]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,asplit=4[lr][fcsrc][lfe_src][rear_src];
+[lr]channelsplit=channel_layout=stereo[FL_raw][FR_raw];
+[FL_raw]equalizer=f=8200:t=q:w=1.2:g=0.20,volume=__FRONT_VOL__[FL_out];
+[FR_raw]equalizer=f=7800:t=q:w=1.2:g=0.20,volume=__FRONT_VOL__[FR_out];
+[fcsrc]pan=1c|c0=__FC_MIX__*FL+__FC_MIX__*FR[fc_mono];
+[fc_mono]highpass=f=__FC_HP__:t=q:w=0.707,lowpass=f=__FC_LP__,__FC_EQ__,volume=__FC_VOL__[FC_out];
+[lfe_src]pan=1c|c0=0.5*FL+0.5*FR[lfe_mono];
+[lfe_mono]highpass=f=20:t=q:w=0.707,lowpass=f=85,equalizer=f=45:t=q:w=1.2:g=0.4,equalizer=f=120:t=q:w=1.0:g=-2.8,volume=__LFE_VOL__[LFE_out];
+[rear_src]asplit=3[sl_side_in][sr_side_in][bed_src];
+[sl_side_in]pan=1c|c0=__SUR_PAN__*FL-__SUR_PAN__*FR,adelay=__SUR_DELAY__,allpass=f=1400:width_type=o:width=0.65,__SUR_EQ__,volume=__SUR_VOL__[SL_side];
+[sr_side_in]pan=1c|c0=__SUR_PAN__*FR-__SUR_PAN__*FL,adelay=__SUR_DELAY__,allpass=f=1200:width_type=o:width=0.65,__SUR_EQ__,volume=__SUR_VOL__[SR_side];
+[bed_src]pan=1c|c0=0.5*FL+0.5*FR[bed_mono];
+[bed_mono]asplit=2[bed_l][bed_r];
+[bed_l]adelay=__BED_DELAY_L__,allpass=f=900:width_type=o:width=0.60,allpass=f=2600:width_type=o:width=0.70,__BED_EQ__,volume=__SUR_BED_VOL__[SL_bed];
+[bed_r]adelay=__BED_DELAY_R__,allpass=f=1100:width_type=o:width=0.60,allpass=f=3100:width_type=o:width=0.70,__BED_EQ__,volume=__SUR_BED_VOL__[SR_bed];
+[SL_side][SL_bed]amix=inputs=2:normalize=0:dropout_transition=0[SL_out];
+[SR_side][SR_bed]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
+[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000,alimiter=limit=0.97:attack=3.0:release=60:level=0,aresample=48000[aout]
+FILTER_EOF
+}
+
+build_quad_filter() {
+  cat <<'FILTER_EOF' | sed \
+    -e "s|__A_STREAM_INDEX__|${A_STREAM_INDEX}|g" \
+    -e "s|__FRONT_VOL__|${FRONT_VOL}|g" \
+    -e "s|__FC_MIX__|${FC_MIX}|g" \
+    -e "s|__FC_HP__|${FC_HP}|g" \
+    -e "s|__FC_LP__|${FC_LP}|g" \
+    -e "s|__FC_EQ__|${FC_EQ}|g" \
+    -e "s|__FC_VOL__|${FC_VOL}|g" \
+    -e "s|__LFE_VOL__|${LFE_VOL}|g" \
+    -e "s|__QUAD_DELAY_L__|${QUAD_DELAY_L}|g" \
+    -e "s|__QUAD_DELAY_R__|${QUAD_DELAY_R}|g" \
+    -e "s|__QUAD_HP__|${QUAD_HP}|g" \
+    -e "s|__QUAD_LP__|${QUAD_LP}|g" \
+    -e "s|__QUAD_VOL__|${QUAD_VOL}|g" \
+    -e "s|__QUAD_AIR_VOL__|${QUAD_AIR_VOL}|g"
+[0:__A_STREAM_INDEX__]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,asplit=3[lr][fcsrc][lfe_src];
+[lr]channelsplit=channel_layout=stereo[FL_raw][FR_raw];
+[FL_raw]asplit=2[FL_front_in][FL_quad_in];
+[FR_raw]asplit=2[FR_front_in][FR_quad_in];
+[FL_front_in]equalizer=f=8200:t=q:w=1.2:g=0.15,volume=__FRONT_VOL__[FL_out];
+[FR_front_in]equalizer=f=7800:t=q:w=1.2:g=0.15,volume=__FRONT_VOL__[FR_out];
+[fcsrc]pan=1c|c0=__FC_MIX__*FL+__FC_MIX__*FR[fc_mono];
+[fc_mono]highpass=f=__FC_HP__:t=q:w=0.707,lowpass=f=__FC_LP__,__FC_EQ__,volume=__FC_VOL__[FC_out];
+[lfe_src]pan=1c|c0=0.5*FL+0.5*FR[lfe_mono];
+[lfe_mono]highpass=f=20:t=q:w=0.707,lowpass=f=80,equalizer=f=45:t=q:w=1.2:g=0.3,equalizer=f=120:t=q:w=1.0:g=-3.0,volume=__LFE_VOL__[LFE_out];
+[FL_quad_in]adelay=__QUAD_DELAY_L__,highpass=f=__QUAD_HP__:t=q:w=0.707,lowpass=f=__QUAD_LP__,allpass=f=1400:width_type=o:width=0.55,volume=__QUAD_VOL__[SL_quad];
+[FR_quad_in]adelay=__QUAD_DELAY_R__,highpass=f=__QUAD_HP__:t=q:w=0.707,lowpass=f=__QUAD_LP__,allpass=f=1200:width_type=o:width=0.55,volume=__QUAD_VOL__[SR_quad];
+[SL_quad]asplit=2[SL_main][SL_air_in];
+[SL_air_in]highpass=f=1800,lowpass=f=9000,adelay=7,allpass=f=2600:width_type=o:width=0.65,equalizer=f=7200:t=q:w=2.0:g=-0.8,volume=__QUAD_AIR_VOL__[SL_air];
+[SL_main][SL_air]amix=inputs=2:normalize=0:dropout_transition=0[SL_out];
+[SR_quad]asplit=2[SR_main][SR_air_in];
+[SR_air_in]highpass=f=1800,lowpass=f=9000,adelay=9,allpass=f=3100:width_type=o:width=0.65,equalizer=f=7200:t=q:w=2.0:g=-0.8,volume=__QUAD_AIR_VOL__[SR_air];
+[SR_main][SR_air]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
+[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000,alimiter=limit=0.97:attack=3.0:release=60:level=0,aresample=48000[aout]
+FILTER_EOF
+}
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Ciclo elaborazione
@@ -260,45 +349,13 @@ for CUR_FILE in "${FILES[@]}"; do
 
   info "Stream [$A_STREAM_INDEX]: ${A_CHANNELS}ch, lingua: ${A_LANG:-und}"
 
-  # ── Matrice Upmix V7 ───────────────────────────────────────────────────────
-  # Front L/R:
-  #   restano a volume pieno: il phantom center originale non viene sabotato.
-  #
-  # FC:
-  #   center-assist da mid mono attenuato, non sostituto dei frontali.
-  #   HP/LP dedicati per dare corpo con crossover 110-120Hz senza impastare.
-  #
-  # Rear:
-  #   side matrix = ambiente reale stereo, quando esiste differenza L-R.
-  #   rear bed = piccolo letto decorrelato dal mid per materiale mono-ish.
-  #   Il bed e' filtrato con dip sulle zone di intelligibilita' vocale per non
-  #   far parlare gli attori da dietro la testa. Perche' siamo civili, almeno qui.
-  #
-  # Limiter:
-  #   nessun limiter intermedio sui rear; solo finale post-join con level=0.
-  UPMIX_FILTER="
-[0:${A_STREAM_INDEX}]asplit=4[lr][mid][fcsrc][side];
-[lr]channelsplit=channel_layout=stereo[FL_raw][FR_raw];
-[FL_raw]equalizer=f=8200:t=q:w=1.2:g=0.25,volume=${FRONT_VOL}[FL_out];
-[FR_raw]equalizer=f=7800:t=q:w=1.2:g=0.25,volume=${FRONT_VOL}[FR_out];
-[mid]pan=1c|c0=0.5*FL+0.5*FR[mid_mono];
-[fcsrc]pan=1c|c0=${FC_MIX}*FL+${FC_MIX}*FR[fc_mono];
-[mid_mono]asplit=2[lfe_in][bed_in];
-[fc_mono]highpass=f=${FC_HP},lowpass=f=${FC_LP},${FC_EQ},volume=${FC_VOL}[FC_out];
-[lfe_in]lowpass=f=85,equalizer=f=45:t=q:w=1.2:g=0.6,equalizer=f=120:t=q:w=1.0:g=-2.4,volume=${LFE_VOL}[LFE_out];
-[side]asplit=2[sl_side_in][sr_side_in];
-[sl_side_in]pan=1c|c0=${SUR_PAN}*FL-${SUR_PAN}*FR,adelay=${SUR_DELAY},allpass=f=1400:width_type=o:width=0.8,${SUR_EQ},volume=${SUR_VOL}[SL_side];
-[sr_side_in]pan=1c|c0=${SUR_PAN}*FR-${SUR_PAN}*FL,adelay=${SUR_DELAY},allpass=f=1200:width_type=o:width=0.8,${SUR_EQ},volume=${SUR_VOL}[SR_side];
-[bed_in]asplit=2[bed_l][bed_r];
-[bed_l]adelay=${BED_DELAY_L},allpass=f=900:width_type=o:width=0.7,allpass=f=2600:width_type=o:width=0.9,${BED_EQ},volume=${SUR_BED_VOL}[SL_bed];
-[bed_r]adelay=${BED_DELAY_R},allpass=f=1100:width_type=o:width=0.7,allpass=f=3100:width_type=o:width=0.9,${BED_EQ},volume=${SUR_BED_VOL}[SR_bed];
-[SL_side][SL_bed]amix=inputs=2:normalize=0:dropout_transition=0[SL_out];
-[SR_side][SR_bed]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
-[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
-alimiter=limit=0.97:attack=3.0:release=60:level=0[aout]
-"
+  if [[ "$MODE" == "to51" ]]; then
+    UPMIX_FILTER="$(build_to51_filter)"
+  else
+    UPMIX_FILTER="$(build_quad_filter)"
+  fi
 
-  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_V7_${MODE^^}.mkv"
+  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_V8_${MODE^^}.mkv"
 
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then

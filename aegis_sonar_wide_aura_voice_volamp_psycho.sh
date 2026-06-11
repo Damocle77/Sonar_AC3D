@@ -4,7 +4,7 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   aegis_sonar_wide_aura_voice_volamp.sh - GOD TIER EDITION - Aprile 2026     │
+# │   aegis_sonar_wide_aura_voice_volamp.sh - GOD TIER EDITION - Maggio 2026     │
 # │                                                                              │
 # │   Motore di processing audio offline per tracce 5.1 (eAC3/AC3).              │
 # │   Corregge dinamicamente mix sbilanciati tramite preset psicoacustici,       │
@@ -12,8 +12,8 @@ set -uo pipefail
 # │   surround (Aegis, Sonar, Wide, Aura) senza alterare LFE e frontali L/R.     │
 # │                                                                              │
 # │   READABILITY REFACTOR:                                                      │
-# │   - DSP ottimizzato per satelliti small / crossover 110-120 Hz               │
-# │   - Voce più asciutta e intelligibile a basso volume                         │
+# │   - DSP ottimizzato per JBL SCS200 / AVR crossover 100 Hz                    │
+# │   - Voce italiana: intelligibilità a basso volume senza perdere corpo        │
 # │   - Surround psicoacustici più controllati e meno artificiali                │
 # │   - Pipeline leggibile: input -> split -> voice -> surround -> output        │
 # ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -213,7 +213,7 @@ fi
 # Low-volume intelligibility: center più leggibile senza effetto megafono.
 # Niente highpass alto sul dialogo: il controllo sibilanti è fatto con EQ statico leggero.
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
-[FC]highpass=f=90,equalizer=f=220:t=q:w=1.4:g=-1.2,equalizer=f=350:t=q:w=1.4:g=-0.8,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_pre];
+[FC]highpass=f=102:t=q:w=0.707,equalizer=f=220:t=q:w=1.4:g=-0.8,equalizer=f=350:t=q:w=1.4:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_pre];
 EOF
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
 [FC_pre]volume=1.5dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.3,equalizer=f=3800:t=q:w=2.0:g=0.8,equalizer=f=6800:t=q:w=2.0:g=-0.8,volume=0.96[FCv];
@@ -235,42 +235,42 @@ EOF
 # ────────────────────────────────────────────────────────────────────────────────
 read -r -d '' SUR_FILTERS_SONAR <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
-[SLd_in]adelay=0,highpass=f=100,volume=0.95[SLd];
+[SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
 [SLp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
 [SLh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
-[SLlate_in]adelay=50,highpass=f=150,lowpass=f=1500,volume=0.65[SLlate];
+[SLlate_in]adelay=38,highpass=f=150,lowpass=f=1500,volume=0.58[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
-[SRd_in]adelay=0,highpass=f=100,volume=0.95[SRd];
+[SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
 [SRp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
 [SRh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
-[SRlate_in]adelay=50,highpass=f=150,lowpass=f=1500,volume=0.65[SRlate];
+[SRlate_in]adelay=41,highpass=f=150,lowpass=f=1500,volume=0.58[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SR_out];
 EOF
 
 read -r -d '' SUR_FILTERS_AEGIS <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
-[SLd_in]adelay=0,highpass=f=100,volume=0.95[SLd];
+[SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
 [SLp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
 [SLh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
-[SLlate_in]adelay=50,highpass=f=150,lowpass=f=1300,volume=0.45[SLlate];
+[SLlate_in]adelay=39,highpass=f=150,lowpass=f=1300,volume=0.42[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
-[SRd_in]adelay=0,highpass=f=100,volume=0.95[SRd];
+[SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
 [SRp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
 [SRh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
-[SRlate_in]adelay=50,highpass=f=150,lowpass=f=1300,volume=0.45[SRlate];
+[SRlate_in]adelay=42,highpass=f=150,lowpass=f=1300,volume=0.42[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SR_out];
 EOF
 
 read -r -d '' SUR_FILTERS_WIDE <<'EOF' || true
 [SL]asplit=3[SLd_in][SLe_in][SLx_in];
-[SLd_in]adelay=1,highpass=f=100,volume=1.00[SLd];
+[SLd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SLd];
 [SLe_in]adelay=9,highpass=f=280,lowpass=f=7000,allpass=f=1200:t=q:w=0.65,volume=0.42[SLe];
 [SLx_in]adelay=22,highpass=f=600,lowpass=f=5000,allpass=f=700:t=q:w=0.70,allpass=f=2600:t=q:w=0.70,volume=0.17[SLx];
 [SLd][SLe][SLx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SL_out];
 [SR]asplit=3[SRd_in][SRe_in][SRx_in];
-[SRd_in]adelay=1,highpass=f=100,volume=1.00[SRd];
+[SRd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SRd];
 [SRe_in]adelay=10,highpass=f=280,lowpass=f=7000,allpass=f=1350:t=q:w=0.65,volume=0.42[SRe];
 [SRx_in]adelay=24,highpass=f=600,lowpass=f=5000,allpass=f=820:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,volume=0.17[SRx];
 [SRd][SRe][SRx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SR_out];
@@ -278,18 +278,18 @@ EOF
 
 read -r -d '' SUR_FILTERS_AURA <<'EOF' || true
 [SL]asplit=2[SLd_in][SLa_in];
-[SLd_in]adelay=1,highpass=f=100,volume=1.00[SLd];
+[SLd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SLd];
 [SLa_in]adelay=8,highpass=f=800,lowpass=f=4500,allpass=f=1400:t=q:w=0.65,volume=0.22[SLa];
 [SLd][SLa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SL_out];
 [SR]asplit=2[SRd_in][SRa_in];
-[SRd_in]adelay=1,highpass=f=100,volume=1.00[SRd];
+[SRd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SRd];
 [SRa_in]adelay=9,highpass=f=800,lowpass=f=4500,allpass=f=1550:t=q:w=0.65,volume=0.22[SRa];
 [SRd][SRa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SR_out];
 EOF
 
 read -r -d '' SUR_FILTERS_VOICEONLY <<'EOF' || true
-[SL]volume=0.85[SL_out];
-[SR]volume=0.85[SR_out];
+[SL]highpass=f=112:t=q:w=0.707,volume=0.85[SL_out];
+[SR]highpass=f=112:t=q:w=0.707,volume=0.85[SR_out];
 EOF
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -300,28 +300,28 @@ set_preset_profile() {
     sonar)
       SUR_BLOCK="$SUR_FILTERS_SONAR"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
-      DECORR_GAIN="0.075"
+      DECORR_GAIN="0.060"
       LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0"
       MODE_TITLE="Sonar (Atmos Like)"
       ;;
     aegis)
       SUR_BLOCK="$SUR_FILTERS_AEGIS"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AEGIS}"
-      DECORR_GAIN="0.065"
+      DECORR_GAIN="0.052"
       LIMITER_OPTS="limit=0.98:attack=2.5:release=50:level=0"
       MODE_TITLE="AEGIS (Neural:X Like)"
       ;;
     aura)
       SUR_BLOCK="$SUR_FILTERS_AURA"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AURA}"
-      DECORR_GAIN="0.040"
+      DECORR_GAIN="0.035"
       LIMITER_OPTS="limit=0.975:attack=3.0:release=60:level=0"
       MODE_TITLE="AURA (Dolby 6.1 Like)"
       ;;
     wide)
       SUR_BLOCK="$SUR_FILTERS_WIDE"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_WIDE}"
-      DECORR_GAIN="0.050"
+      DECORR_GAIN="0.045"
       LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0"
       MODE_TITLE="Wide (7.1 Like)"
       ;;
@@ -344,6 +344,8 @@ build_input_split_graph() {
 [0:${A_STREAM_INDEX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},
 pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L_CH}|SR=${SUR_R_CH}[base];
 [base]channelsplit=channel_layout=5.1(side)[FL][FR][FC][LFE][SL][SR];
+[FL]highpass=f=112:t=q:w=0.707[FLp];
+[FR]highpass=f=112:t=q:w=0.707[FRp];
 EOF
 }
 
@@ -359,10 +361,10 @@ EOF
   else
     cat <<EOF
 [SL_out]asplit=2[SL_main][SL_air_in];
-[SL_air_in]highpass=f=1500,lowpass=f=10000,adelay=9,allpass=f=1300:t=q:w=0.65,allpass=f=3600:t=q:w=0.70,equalizer=f=7200:t=q:w=2.0:g=-0.8,volume=${DECORR_GAIN}[SL_air];
+[SL_air_in]highpass=f=1600,lowpass=f=9500,adelay=12,allpass=f=1400:t=q:w=0.60,allpass=f=3400:t=q:w=0.65,equalizer=f=7200:t=q:w=2.0:g=-1.0,volume=${DECORR_GAIN}[SL_air];
 [SL_main][SL_air]amix=inputs=2:weights='1 1':normalize=0[SL_final];
 [SR_out]asplit=2[SR_main][SR_air_in];
-[SR_air_in]highpass=f=1500,lowpass=f=10000,adelay=11,allpass=f=1550:t=q:w=0.65,allpass=f=3300:t=q:w=0.70,equalizer=f=7200:t=q:w=2.0:g=-0.8,volume=${DECORR_GAIN}[SR_air];
+[SR_air_in]highpass=f=1600,lowpass=f=9500,adelay=15,allpass=f=1650:t=q:w=0.60,allpass=f=3150:t=q:w=0.65,equalizer=f=7200:t=q:w=2.0:g=-1.0,volume=${DECORR_GAIN}[SR_air];
 [SR_main][SR_air]amix=inputs=2:weights='1 1':normalize=0[SR_final];
 EOF
   fi
@@ -370,14 +372,14 @@ EOF
 
 build_output_join_graph() {
   cat <<EOF
-[FL]aformat=channel_layouts=mono[FLf];
-[FR]aformat=channel_layouts=mono[FRf];
+[FLp]aformat=channel_layouts=mono[FLf];
+[FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
 [LFE]aformat=channel_layouts=mono[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
-${FINAL_GAIN_FILTER}alimiter=${LIMITER_OPTS}[aout]
+highshelf=f=12000:g=0.8:w=0.5:c=FL|FR|FC|SL|SR,${FINAL_GAIN_FILTER}aresample=192000,alimiter=${LIMITER_OPTS},aresample=48000[aout]
 EOF
 }
 

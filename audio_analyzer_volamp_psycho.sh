@@ -3,7 +3,7 @@
 set -uo pipefail
 
 # ╭─────────────────────────────────────────────────────────────────────────────────╮
-# │   audio_analyzer_delta.sh - V4.6 DELTA/VOLAMP/FILES/AUTORUN - Maggio 2026       │
+# │   audio_analyzer_delta.sh - DELTA/VOLAMP/FILES/AUTORUN - Maggio 2026            │
 # │                                                                                 │
 # │   Sonda euristica per l'analisi offline di container multimediali 5.1.          │
 # │   Misura il bilanciamento surround/centro e genera run_processing.sh            │
@@ -133,6 +133,18 @@ else
 fi
 info "Volamp heuristic: target loudness prudente con step 0 / 1.5 / 2 / 2.5 dB"
 
+# ── CONFIG ANALITICA INTERNA ──────────────────────────────────────────────────
+# Target domestico fisso: niente variabili da esportare prima del lancio.
+# -21 LUFS = compromesso home theater; -23 LUFS sarebbe piu' broadcast/reference.
+LOUDNESS_TARGET="-21.0"
+
+# Se la media energetica dei surround e' sotto questa soglia, trattiamo il file
+# come falso 5.1 / front-heavy e forziamo un preset conservativo.
+FAKE_SUR_GATE="-60.0"
+
+info "Target loudness analitico: ${LOUDNESS_TARGET} LUFS"
+info "Fake 5.1 gate surround: ${FAKE_SUR_GATE} LUFS"
+
 # Variabili globali per il verdetto stagionale
 GLOBAL_METRIC_VALUES=()
 GLOBAL_METRIC_FILES=()
@@ -141,6 +153,8 @@ GLOBAL_LOUDNESS_VALUES=()
 GLOBAL_VOLAMP_VALUES=()
 GLOBAL_WIDTH_VALUES=()
 GLOBAL_LRA_VALUES=()
+GLOBAL_PRESET_VALUES=()
+GLOBAL_PRESET_FORCED_VALUES=()
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Raccolta file
@@ -328,7 +342,7 @@ loudness_to_volamp() {
   [[ "$i_val" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "0"; return; }
 
   local deficit
-  deficit=$(awk -v i="$i_val" 'BEGIN { printf "%.2f", (-18.0 - i) }')
+  deficit=$(awk -v i="$i_val" -v t="$LOUDNESS_TARGET" 'BEGIN { printf "%.2f", (t - i) }')
 
   if awk -v d="$deficit" 'BEGIN { exit !(d < 0.8) }'; then
     echo "0"
@@ -502,6 +516,13 @@ scan_delta() {
   read -r i_sur delta < "$_delta_tmp"
   rm -f "$_delta_tmp"
 
+  local forced_preset=0 forced_reason=""
+  if awk -v sur="$i_sur" -v gate="$FAKE_SUR_GATE" 'BEGIN { exit !(sur < gate) }'; then
+    warn "Surround virtualmente muti (${i_sur} LUFS): falso 5.1 / front-heavy. Forzo VOICE."
+    forced_preset=1
+    forced_reason="fake_surround"
+  fi
+
   info "Misura width Mid/Side SL-SR..."
   local i_mid i_side width_ms width_desc
   i_mid=$(measure_channel_loudness "$f" "$target_stream" "c0=0.5*${sur_l}+0.5*${sur_r}")
@@ -525,7 +546,11 @@ scan_delta() {
   [[ "$volamp" != "$volamp_raw" ]] && volamp_note=" cap LRA"
 
   local preset_raw
-  preset_raw=$(delta_to_preset "$delta")
+  if [[ "$forced_preset" -eq 1 ]]; then
+    preset_raw="VOICE|\033[1;33m"
+  else
+    preset_raw=$(delta_to_preset "$delta")
+  fi
   local preset="${preset_raw%%|*}"
   local p_color="${preset_raw##*|}"
 
@@ -537,6 +562,7 @@ scan_delta() {
     AEGIS) preset_desc="Surround buoni, controllo e bilanciamento" ;;
     VOICE) preset_desc="Surround forti o centro coperto, priorita' voce" ;;
   esac
+  [[ "$forced_preset" -eq 1 ]] && preset_desc="${preset_desc}; forzato da ${forced_reason}"
 
   GLOBAL_METRIC_VALUES+=("$delta")
   GLOBAL_METRIC_FILES+=("$(basename "$f")")
@@ -545,6 +571,8 @@ scan_delta() {
   GLOBAL_VOLAMP_VALUES+=("$volamp")
   GLOBAL_WIDTH_VALUES+=("${width_ms:-N/A}")
   GLOBAL_LRA_VALUES+=("${lra_full:-N/A}")
+  GLOBAL_PRESET_VALUES+=("$preset")
+  GLOBAL_PRESET_FORCED_VALUES+=("$forced_preset")
 
   ok "Risultati Delta per: $f"
   echo -e "  \033[1;33mI(FC):    \033[0m  ${i_fc} LUFS"
@@ -618,6 +646,14 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     echo -e "  Range:               \033[0;37m${m_min} / ${m_max} dB  (spread: ${m_spread} dB)\033[0m"
     echo -e "  Preset Consigliato:  ${season_color}${season_preset}\033[0m  (${season_desc})"
 
+    forced_count=0
+    for fp in "${GLOBAL_PRESET_FORCED_VALUES[@]}"; do
+      [[ "$fp" == "1" ]] && forced_count=$((forced_count + 1))
+    done
+    if [[ "$forced_count" -gt 0 ]]; then
+      echo -e "  \033[0;33mNota: ${forced_count} file con surround virtualmente muti: preset forzato per-file a VOICE.\033[0m"
+    fi
+
     if [[ ${#GLOBAL_VOLAMP_VALUES[@]} -gt 0 ]]; then
       _volamp_tmp=$(mktemp)
       printf '%s\n' "${GLOBAL_VOLAMP_VALUES[@]}" > "$_volamp_tmp"
@@ -632,7 +668,11 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       echo -e "  \033[0;33m   Per risultati ottimali, considera i preset per-file:\033[0m"
       echo ""
       for (( i=0; i<CNT; i++ )); do
-        pf_raw=$(delta_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
+        if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" ]]; then
+          pf_raw="VOICE|\033[1;33m"
+        else
+          pf_raw=$(delta_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
+        fi
         pf_preset="${pf_raw%%|*}"
         pf_color="${pf_raw##*|}"
         fname="${GLOBAL_METRIC_FILES[$i]}"
@@ -673,7 +713,9 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       esac
 
       file_preset=""
-      if [[ "$HIGH_SPREAD" -eq 1 ]]; then
+      if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" ]]; then
+        file_preset="${GLOBAL_PRESET_VALUES[$i]}"
+      elif [[ "$HIGH_SPREAD" -eq 1 ]]; then
         pf_raw=$(delta_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
         file_preset="${pf_raw%%|*}"
       else
