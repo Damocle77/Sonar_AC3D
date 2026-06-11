@@ -6,6 +6,8 @@
 
 Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracce audio stereo, 5.1 e Atmos/EAC3 in modo offline, ripetibile e controllato.
 
+> Non tutti i supereroi indossano un mantello. Alcuni lanciano `ffmpeg` e salvano i dialoghi dal multiverso del mix sbagliato.
+
 L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare solo il processing necessario**. Niente DSP opaco, niente pulsanti “enhance” usciti da un film poliziesco del 2003. Solo FFmpeg, euristiche dichiarate e preset psicoacustici ragionati.
 
 La suite è tarata in modo particolare per un setup li livello medio **JBL SCS200 + AVR Yamaha RX + Subwoofer Active Kenwood**, diffusori Small, crossover AVR intorno a **100 Hz**, ascolto domestico a volume medio/basso e priorità all'intelligibilità della voce italiana.
