@@ -96,51 +96,6 @@ awk --version 2>/dev/null || awk -W version
 
 ---
 
-## Workflow rapido
-
-### File 5.1 già esistente
-
-```bash
-./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 no 768k
-./run_processing.sh
-```
-
-### Intera cartella con file 5.1
-
-```bash
-./audio_analyzer_volamp_psycho.sh "" eac3 no 768k
-./run_processing.sh
-```
-
-### Solo 2-3 file campione
-
-```bash
-./audio_analyzer_volamp_psycho.sh --files eac3 no 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
-./run_processing.sh
-```
-
-### Stereo → 5.1 TO51 → analisi → processing
-
-```bash
-./stereo251_upmix_psycho.sh eac3 no "film_stereo.mkv" 448k to51
-./audio_analyzer_volamp_psycho.sh "<file_upmix_generato>.mkv" eac3 no 768k
-./run_processing.sh
-```
-
-### Stereo → 5.1 QUAD ponderato
-
-```bash
-./stereo251_upmix_psycho.sh eac3 no "concert_stereo.mkv" 448k quad
-```
-
-### Atmos/EAC3 → 5.1 DynNorm + Atmos originale
-
-```bash
-./atmos_to_51_dynaudnorm_volamp_psicho.sh "film_atmos.mkv" 768k
-```
-
----
-
 ## 1) `audio_analyzer_volamp_psycho.sh`
 
 Analyzer principale per tracce **5.1**. La metrica unica è **DELTA**:
