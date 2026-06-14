@@ -4,43 +4,48 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   aegis_sonar_wide_aura_voice_volamp.sh - GOD TIER EDITION - Maggio 2026     │
-# │                                                                              │
-# │   Motore di processing audio offline per tracce 5.1 (eAC3/AC3).              │
+# │   aegis_sonar_wide_aura_voice_volamp.sh - GOD TIER EDITION - Giugno 2026     │
+# │   by D@mocle77                                                               │
+# │   Motore di processing audio offline per tracce 5.1 (EAC3/AC3).              │
 # │   Corregge dinamicamente mix sbilanciati tramite preset psicoacustici,       │
 # │   migliorando l'intelligibilità dei dialoghi e ripristinando la bolla        │
-# │   surround (Aegis, Sonar, Wide, Aura) senza alterare LFE e frontali L/R.     │
+# │   surround (Aegis, Sonar, Wide, Aura), con controllo mirato dei picchi LFE.  │
 # │                                                                              │
 # │   READABILITY REFACTOR:                                                      │
 # │   - DSP ottimizzato per JBL SCS200 / AVR crossover 100 Hz                    │
 # │   - Voce italiana: intelligibilità a basso volume senza perdere corpo        │
-# │   - Surround psicoacustici più controllati e meno artificiali                │
+# │   - Surround psicoacustici controllati                                       │
+# │   - LFE peak-control dedicato: sub presente, ma meno assassino nei picchi    │
 # │   - Pipeline leggibile: input -> split -> voice -> surround -> output        │
 # ╰──────────────────────────────────────────────────────────────────────────────╯
 
+# Color codes per log: info, warning, error, ok. Usati per distinguere i livelli di messaggio in console.
 C_INFO="\033[0;36m[INFO]\033[0m"
 C_WARN="\033[0;33m[WARNING]\033[0m"
 C_ERR="\033[0;31m[ERROR]\033[0m"
 C_OK="\033[0;32m[OK]\033[0m"
 
+# Funzioni di log: info, warn, err, ok. Usano colori per distinguere i livelli di messaggio. Non terminano lo script, tranne err che è usato per errori critici.
 info(){ echo -e "${C_INFO} $*"; }
 warn(){ echo -e "${C_WARN} $*"; }
 err(){  echo -e "${C_ERR}  $*"; }
 ok(){   echo -e "${C_OK}  $*"; }
 
+# Controllo dipendenze: ffmpeg e ffprobe sono essenziali per il funzionamento dello script. Se non sono nel PATH, esco con errore.
 for _bin in ffmpeg ffprobe; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
 
 usage() {
   cat <<'USAGE'
+────────────────────────────────────────────────────────────────────────────────────────────────────────── 
 UTILIZZO:
   ./aegis_sonar_wide_aura_voice_volamp.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
 
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
   si|no     : Conserva file audio originale.
-  file      : File input singolo. Se omesso, processa i file compatibili nella cartella.
+  file      : File input singolo. Se omesso, processa tutti file compatibili nella cartella.
   bitrate   : Es. 640k o 768k (default: 640k per AC3, 768k per EAC3).
   preset    : aegis | sonar | wide | aura | voice (default: sonar).
   volamp    : Gain finale opzionale in dB prima del limiter.
@@ -53,27 +58,32 @@ PRESET DISPONIBILI:
   wide      -> Simula Dolby 7.1         | Allargamento Laterale
   aura      -> Simula Dolby 6.1         | Allargamento Posteriore
   voice     -> Esalta i dialoghi (FC)   | EQ Sartoriale Voce
+──────────────────────────────────────────────────────────────────────────────────────────────────────────
 USAGE
   exit 1
 }
 
+# Controllo se un token è un preset valido: deve essere uno dei nomi riconosciuti (aegis, sonar, wide, aura, voice).
 is_preset_name() {
   case "$1" in
     aegis|sonar|wide|aura|voice) return 0 ;;
     *) return 1 ;;
   esac
 }
-
+# Controllo se un token è un bitrate valido: deve essere un numero con optional k/M, es. 640k, 768k, 1M, 1.5M, etc.
 is_bitrate_token() {
   [[ "$1" =~ ^[0-9]+([.][0-9]+)?([kKmM])?$ ]]
 }
 
+# Controllo argomenti: almeno codec e keep_orig sono obbligatori. Il resto è opzionale e flessibile.
 [[ $# -lt 2 ]] && usage
 
+# Parsing argomenti obbligatori: codec di output e flag per conservare l'originale. Il resto dei parametri è opzionale e può essere in qualsiasi ordine.
 OUT_CODEC="${1:-}"
 KEEP_ORIG="${2:-}"
 shift 2
 
+# Parsing flessibile dei parametri: file, bitrate, preset, volamp possono essere in qualsiasi ordine. In base al formato (bitrate, preset name, volamp) o alla posizione (file).
 INPUT_FILE=""
 BITRATE=""
 SUR_MODE=""
@@ -86,6 +96,7 @@ if (( ${#POSITIONAL[@]} > 0 )); then
   LAST_ARG="${POSITIONAL[$LAST_IDX]}"
   LAST_ARG="${LAST_ARG/,/.}"
 
+  # Controllo se è un numero valido e nel range consentito
   if [[ "$LAST_ARG" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     if awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 0 && v <= 2.5) }'; then
       VOLAMP_DB="$LAST_ARG"
@@ -112,21 +123,25 @@ for arg in "${POSITIONAL[@]}"; do
   fi
 done
 
+# Se il preset non è stato specificato, uso il default sonar. Se è stato specificato, deve essere uno dei nomi validi (controllo fatto più avanti).
 SUR_MODE="${SUR_MODE:-sonar}"
 
+# Controllo preset: deve essere uno dei nomi validi.
 case "$SUR_MODE" in
   aegis|sonar|wide|aura|voice) ;;
   *) err "Preset '$SUR_MODE' non riconosciuto. Validi: aegis, sonar, wide, aura, voice."; exit 1 ;;
 esac
-
+# Controllo bitrate opzionale: se specificato, deve essere un numero con optional k/M.
 case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1 ;; esac
 [[ "$KEEP_ORIG" =~ ^(si|no)$ ]] || { err "Parametro 2: si|no"; exit 1; }
 
+# Se il bitrate è specificato, deve essere un numero con optional k/M. Se non specificato, default 640k per AC3 e 768k per EAC3.
 [[ -z "$BITRATE" ]] && {
   [[ "$OUT_CODEC" = "ac3" ]] && BITRATE="640k" || BITRATE="768k"
 }
 [[ "$BITRATE" =~ [kKmM]$ ]] || BITRATE="${BITRATE}k"
 
+# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 2.5 (con optional decimale).
 case "$VOLAMP_DB" in
   0|0.0|0.00|0.000)
     FINAL_GAIN_FILTER=""
@@ -138,6 +153,7 @@ case "$VOLAMP_DB" in
     ;;
 esac
 
+# Descrizioni preset per log: non sono parte del processing, ma aiutano a capire cosa fa ogni preset senza dover leggere il codice.
 case "$SUR_MODE" in
   aegis) DESC="Simula NEURAL:X (DTS:X) | Cupola Sonora" ;;
   sonar) DESC="Simula ATMOS (5.1.2) | Boost Verticale" ;;
@@ -146,11 +162,13 @@ case "$SUR_MODE" in
   voice) DESC="Esalta la voce   | EQ Sartoriale Voce" ;;
 esac
 
+# Log dei parametri finali: utile per confermare cosa è stato interpretato dallo script, soprattutto con parsing flessibile.
 info "Codec output:   $OUT_CODEC"
 info "Surround mode:  $SUR_MODE ($DESC)"
 info "Bitrate Target: $BITRATE"
 info "Final volamp:   $VOLAMP_LABEL"
 
+# Funzione per identificare la traccia audio migliore da processare, con preferenza per 5.1, default, italiano.
 probe_audio_stream() {
   local f="$1" line
   local _lines
@@ -160,6 +178,7 @@ probe_audio_stream() {
 
   [[ ${#_lines[@]} -gt 0 ]] || return 1
 
+  # Scoring semplice: +1000 per 5.1, +200 se default, +300 se italiano. Il resto è secondario.
   local best_line="" best_score=-1
   for line in "${_lines[@]}"; do
     [[ -z "$line" ]] && continue
@@ -170,24 +189,28 @@ probe_audio_stream() {
     lang="${lang:-}"
     layout="${layout:-}"
 
+    # Scoring: preferisco 5.1, poi default, poi italiano. Se più tracce hanno lo stesso punteggio, scelgo la prima (di solito è la migliore).
     local score=0
     [[ "$ch" =~ ^[0-9]+$ && "$ch" -eq 6 ]] && score=$((score+1000))
     [[ "$def" == "1" ]] && score=$((score+200))
     [[ "${lang,,}" =~ ^it ]] && score=$((score+300))
 
+    # Se questo stream ha un punteggio migliore del migliore finora, lo salvo come best_line. In caso di parità, mantengo il primo trovato (di solito è il migliore).
     if (( score > best_score )); then
       best_score=$score
       best_line="$line"
     fi
   done
-
+  # Se non ho trovato tracce valide, esco con errore. Altrimenti, best_line contiene la traccia migliore da processare.
   [[ -n "$best_line" ]] || return 1
 
+  # Estraggo i campi della traccia migliore, con fallback per evitare campi vuoti.
   local o_idx o_ch o_layout o_def o_lang
   IFS=',' read -r o_idx o_ch o_layout o_def o_lang <<<"$best_line"
   echo "${o_idx}|${o_ch:-0}|${o_layout:-}|${o_def:-0}|${o_lang:-}"
 }
 
+# Funzione per ottenere il titolo della traccia audio (se presente), utile per log e debug. Non è critica, quindi errori vengono silenziati.
 get_audio_title_by_index() {
   ffprobe -v error -select_streams a \
     -show_entries stream=index:stream_tags=title \
@@ -195,6 +218,7 @@ get_audio_title_by_index() {
     $0=="index="idx{f=1;next} f&&/^TAG:title=/{sub(/^TAG:title=/,"");print;exit} f&&/^index=/{exit}'
 }
 
+# Costruisco la lista dei file da processare: se è stato specificato un file, lo uso. Altrimenti, cerco tutti i file compatibili nella cartella.
 FILES=()
 if [[ -n "$INPUT_FILE" ]]; then
   [[ -f "$INPUT_FILE" ]] || { err "File non esiste"; exit 1; }
@@ -204,65 +228,72 @@ else
   FILES+=( *.mkv *.MKV *.mp4 *.MP4 *.m2ts *.M2TS *.ac3 *.eac3 )
   shopt -u nullglob
 fi
-
+# Controllo se ho trovato file da processare: se la cartella è vuota o non ci sono file compatibili, esco con errore.
 (( ${#FILES[@]} == 0 )) && { err "Nessun file trovato."; exit 1; }
 
-# ────────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # BLOCCHI VOCE
-# ────────────────────────────────────────────────────────────────────────────────
-# Low-volume intelligibility: center più leggibile senza effetto megafono.
-# Niente highpass alto sul dialogo: il controllo sibilanti è fatto con EQ statico leggero.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# Processing voce: HPF centrale a 102 Hz + EQ parametrico con boost/cut mirati.
+# Obiettivo: dialoghi più leggibili senza effetto megafono, con controllo statico delle sibilanti.
+
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
 [FC]highpass=f=102:t=q:w=0.707,equalizer=f=220:t=q:w=1.4:g=-0.8,equalizer=f=350:t=q:w=1.4:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_pre];
 EOF
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
-[FC_pre]volume=1.5dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.3,equalizer=f=3800:t=q:w=2.0:g=0.8,equalizer=f=6800:t=q:w=2.0:g=-0.8,volume=0.96[FCv];
+[FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_AEGIS <<'EOF' || true
-[FC_pre]volume=1.6dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.3,equalizer=f=3800:t=q:w=2.0:g=0.8,equalizer=f=6800:t=q:w=2.0:g=-0.8,volume=0.96[FCv];
+[FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.5,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_WIDE <<'EOF' || true
-[FC_pre]volume=1.7dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.4,equalizer=f=3800:t=q:w=2.0:g=0.9,equalizer=f=6800:t=q:w=2.0:g=-0.7,volume=0.96[FCv];
+[FC_pre]volume=2.3dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-0.9,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_AURA <<'EOF' || true
-[FC_pre]volume=1.4dB,equalizer=f=1650:t=q:w=1.6:g=0.6,equalizer=f=2450:t=q:w=1.3:g=1.1,equalizer=f=3800:t=q:w=2.0:g=0.7,equalizer=f=6800:t=q:w=2.0:g=-0.8,volume=0.96[FCv];
+[FC_pre]volume=2.0dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.4,equalizer=f=3800:t=q:w=2.0:g=0.9,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_VOICEONLY <<'EOF' || true
-[FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=1.2,equalizer=f=2450:t=q:w=1.3:g=2.0,equalizer=f=3800:t=q:w=2.0:g=1.4,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.95[FCv];
+[FC_pre]volume=2.4dB,equalizer=f=1650:t=q:w=1.6:g=1.0,equalizer=f=2450:t=q:w=1.3:g=1.8,equalizer=f=3800:t=q:w=2.0:g=1.1,equalizer=f=5200:t=q:w=2.0:g=-0.5,equalizer=f=6800:t=q:w=2.0:g=-1.1,volume=0.95[FCv];
 EOF
-# ────────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # BLOCCHI SURROUND
-# ────────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# Preset psicoacustici per surround: differenziazione in base alla modalità, con mix di sub-bande filtrate e pesate per creare l'effetto desiderato.
+
+# SONAR: boost verticale con delay differenziati per SL/SR, più presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_SONAR <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
 [SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
-[SLp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
-[SLh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
+[SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
+[SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
 [SLlate_in]adelay=38,highpass=f=150,lowpass=f=1500,volume=0.58[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
 [SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
-[SRp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
-[SRh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
+[SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
+[SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
 [SRlate_in]adelay=41,highpass=f=150,lowpass=f=1500,volume=0.58[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SR_out];
 EOF
 
+# AEGIS: cupola sonora con boost più bilanciato e meno artificiale, più presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_AEGIS <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
 [SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
-[SLp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
-[SLh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
+[SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
+[SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
 [SLlate_in]adelay=39,highpass=f=150,lowpass=f=1300,volume=0.42[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
 [SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
-[SRp_in]adelay=14,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
-[SRh_in]adelay=28,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
+[SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
+[SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
 [SRlate_in]adelay=42,highpass=f=150,lowpass=f=1300,volume=0.42[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SR_out];
 EOF
 
+# WIDE: allargamento laterale più marcato, con boost più evidente sulle sub-bande filtrate, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_WIDE <<'EOF' || true
 [SL]asplit=3[SLd_in][SLe_in][SLx_in];
 [SLd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SLd];
@@ -276,6 +307,7 @@ read -r -d '' SUR_FILTERS_WIDE <<'EOF' || true
 [SRd][SRe][SRx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SR_out];
 EOF
 
+#AURA: allargamento posteriore più marcato, con boost più evidente sulle sub-bande filtrate, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_AURA <<'EOF' || true
 [SL]asplit=2[SLd_in][SLa_in];
 [SLd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SLd];
@@ -287,20 +319,25 @@ read -r -d '' SUR_FILTERS_AURA <<'EOF' || true
 [SRd][SRa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SR_out];
 EOF
 
+# VOICE-ONLY: preset rescue per esaltare i dialoghi quando il mix è critico.
+# I surround vengono mantenuti, ma leggermente abbassati per dare priorità al centrale.
 read -r -d '' SUR_FILTERS_VOICEONLY <<'EOF' || true
-[SL]highpass=f=112:t=q:w=0.707,volume=0.85[SL_out];
-[SR]highpass=f=112:t=q:w=0.707,volume=0.85[SR_out];
+[SL]highpass=f=112:t=q:w=0.707,volume=0.88[SL_out];
+[SR]highpass=f=112:t=q:w=0.707,volume=0.88[SR_out];
 EOF
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # PROFILI PRESET
-# ────────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# La funzione set_preset_profile imposta le variabili globali per il processing in base al preset scelto. Ogni preset ha un blocco di filtri surround specifico, 
+# un blocco di filtri voce specifico, un guadagno di decorrelazione per l'aria, e opzioni del limiter finale.
+
 set_preset_profile() {
   case "$SUR_MODE" in
     sonar)
       SUR_BLOCK="$SUR_FILTERS_SONAR"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
-      DECORR_GAIN="0.060"
+      DECORR_GAIN="0.042"
       LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0"
       MODE_TITLE="Sonar (Atmos Like)"
       ;;
@@ -339,6 +376,7 @@ set_preset_profile() {
   esac
 }
 
+# La funzione build_filter_complex costruisce dinamicamente il filtergraph di ffmpeg in base al preset scelto, concatenando i blocchi di input split, processing voce, processing surround, e output join.
 build_input_split_graph() {
   cat <<EOF
 [0:${A_STREAM_INDEX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},
@@ -349,10 +387,8 @@ pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L_CH}|SR=${SUR_R_CH}[base];
 EOF
 }
 
-
+# Il blocco di processing surround psicoacustico: se DECORR_GAIN è 0, salto completamente la decorrelazione e lascio i canali SL/SR inalterati. Altrimenti applico un layer di decorrelazione per creare aria/lateralità.
 build_surround_psycho_graph() {
-  # Air layer psicoacustico: micro-decorrelazione continua, a basso livello.
-  # Serve a dare aria/lateralità ai surround senza gonfiare il volume o creare pumping.
   if [[ "${DECORR_GAIN:-0}" = "0" ]]; then
     cat <<EOF
 [SL_out]anull[SL_final];
@@ -370,19 +406,22 @@ EOF
   fi
 }
 
+# Il blocco di join finale: unisco tutti i canali processati, applico un boost high-shelf leggero per compensare eventuali perdite di brillantezza, poi il volamp finale (se attivo).
+#
 build_output_join_graph() {
   cat <<EOF
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono[LFEf];
+[LFE]aformat=channel_layouts=mono,alimiter=limit=0.94:attack=2.0:release=120:level=0[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
-highshelf=f=12000:g=0.8:w=0.5:c=FL|FR|FC|SL|SR,${FINAL_GAIN_FILTER}aresample=192000,alimiter=${LIMITER_OPTS},aresample=48000[aout]
+highshelf=f=12000:g=0.4:w=0.5:c=FL|FR|FC|SL|SR,${FINAL_GAIN_FILTER}aresample=192000,alimiter=${LIMITER_OPTS},aresample=48000[aout]
 EOF
 }
 
+# La funzione
 build_filter_complex() {
   local input_graph psycho_graph output_graph
   input_graph="$(build_input_split_graph)"
@@ -391,17 +430,22 @@ build_filter_complex() {
   printf '%s\n%s\n%s\n%s\n%s\n' "$input_graph" "$VOICE_BLOCK" "$SUR_BLOCK" "$psycho_graph" "$output_graph"
 }
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # CICLO ELABORAZIONE
-# ────────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# Ciclo principale di elaborazione: per ogni file, identifico la traccia audio migliore, costruisco dinamicamente il filtergraph in base al preset scelto, e lancio ffmpeg. 
+# Se il file di output esiste già, chiedo conferma prima di sovrascrivere (con opzione "tutti" per sovrascrivere tutto senza chiedere).
+
 OVERWRITE_ALL=false
 
 for CUR_FILE in "${FILES[@]}"; do
   info "Input: $CUR_FILE"
 
+  # Identifico la traccia audio migliore da processare, con preferenza per 5.1, default, italiano. Se non trovo tracce valide, skippo il file.
   PROBE_RESULT=$(probe_audio_stream "$CUR_FILE") || { warn "Nessuna traccia audio valida"; continue; }
   IFS='|' read -r A_STREAM_INDEX A_CHANNELS A_LAYOUT A_IS_DEFAULT A_LANG <<<"$PROBE_RESULT"
 
+  # Determino il layout di input e i nomi dei canali surround in base al channel layout rilevato. Se il layout non è standard o non è 5.1, uso 5.1(side) come fallback e avverto.
   case "$A_LAYOUT" in
     "5.1(side)")
       IN_LAYOUT="5.1(side)"; SUR_L_CH="SL"; SUR_R_CH="SR"
@@ -415,14 +459,17 @@ for CUR_FILE in "${FILES[@]}"; do
       ;;
   esac
 
+  # Se non è un 5.1, skippo il file: il processing è ottimizzato per 5.1, e altri layout potrebbero non suonare correttamente o richiedere adattamenti specifici.
   if [[ "$A_CHANNELS" -ne 6 ]]; then
     warn "Non è un 5.1 (Canali: $A_CHANNELS) → Salto."
     continue
   fi
 
+  # Imposto il profilo preset per questo file, costruisco il filter_complex dinamicamente, e preparo il comando ffmpeg. Se il file esiste già, chiedo conferma prima di sovrascrivere.
   set_preset_profile
   OUT_FILE="${CUR_FILE%.*}_${OUT_CODEC^^}_${SUR_MODE^}.mkv"
 
+  # Se il file di output esiste già, chiedo conferma prima di sovrascrivere (con opzione "tutti" per sovrascrivere tutto senza chiedere).
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
       echo -ne "${C_WARN} Il file '$OUT_FILE' esiste già. Sovrascrivere? [s/n/t] (s=sì, n=no, t=tutti): "
@@ -445,8 +492,10 @@ for CUR_FILE in "${FILES[@]}"; do
     fi
   fi
 
+  # Costruisco dinamicamente il filter_complex in base al preset scelto, concatenando i blocchi di input split, processing voce, processing surround, e output join.
   FILTER_COMPLEX="$(build_filter_complex)"
 
+  # Preparo il comando ffmpeg con i parametri dinamici: input, filter_complex, mappatura tracce, codec audio, bitrate, metadata, e output.
   CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning)
   [[ -f "$OUT_FILE" ]] && CMD+=( -y )
   CMD+=(
@@ -461,15 +510,18 @@ for CUR_FILE in "${FILES[@]}"; do
     -disposition:a:0 default
   )
 
+  # Imposto la lingua della traccia audio principale, se specificata.
   [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]] && CMD+=( -metadata:s:a:0 language="$A_LANG" )
 
+  # Se l'opzione KEEP_ORIG è attiva, mantengo la traccia audio originale come secondaria, copiandola senza ricodifica e disattivando la flag di default.
   if [[ "$KEEP_ORIG" = "si" ]]; then
     ORIG_TITLE=$(get_audio_title_by_index "$CUR_FILE" "$A_STREAM_INDEX" || echo "Original Audio")
     CMD+=( -map 0:"$A_STREAM_INDEX" -c:a:1 copy -metadata:s:a:1 title="$ORIG_TITLE" -disposition:a:1 0 )
   fi
 
+  # Lancio ffmpeg con il comando costruito dinamicamente. Se il comando riesce, loggo "Creato: $OUT_FILE". Altrimenti, loggo "Errore su: $CUR_FILE".
   CMD+=( "$OUT_FILE" )
   "${CMD[@]}" && ok "Creato: $OUT_FILE" || warn "Errore su: $CUR_FILE"
 done
-
+# Log finale: elaborazione completata.
 ok "Elaborazione completata"
