@@ -10,13 +10,13 @@ Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracc
 
 L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare solo il processing necessario**. Niente DSP opaco, niente pulsanti “enhance” usciti da un film poliziesco del 2003. Solo FFmpeg, euristiche dichiarate e preset psicoacustici ragionati.
 
-La suite è tarata in modo particolare per un setup li livello medio **JBL SCS200 + AVR Yamaha RX + Subwoofer Active Kenwood**, diffusori Small, crossover AVR intorno a **100 Hz**, ascolto domestico a volume medio/basso e priorità all'intelligibilità della voce italiana.
+La suite è tarata per setup domestico a livello medio con diffusori compatti, subwoofer attivo, crossover intorno a **110 Hz**, ascolto a volume medio/basso e priorità all'intelligibilità della voce italiana. *(Testato su: AVR Yamaha RX-4RV, kit 5.1 JBL SCS200, subwoofer attivo Kenwood)*
 
 Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione a:
 
 - dialoghi intelligibili senza effetto megafono;
 - surround presenti ma non invadenti;
-- protezione dei piccoli satelliti JBL tramite passa-alto morbidi;
+- protezione dei piccoli satelliti tramite passa-alto morbidi;
 - basso gestito principalmente dall'AVR/sub, senza gonfiare LFE inutilmente;
 - loudness domestico prudente tramite `volamp`;
 - batch ripetibili su film, episodi e cartelle intere.
@@ -25,29 +25,13 @@ Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione 
 
 ---
 
-## Indice
-
-- [Requisiti](#requisiti)
-- [Installazione](#installazione)
-- [Script inclusi](#script-inclusi)
-- [1. Analyzer 5.1 Delta / Volamp](#1-audio_analyzer_volamp_psychosh)
-- [2. Processing 5.1 Aegis / Sonar / Wide / Aura / Voice](#2-aegis_sonar_wide_aura_voice_volamp_psychosh)
-- [3. Upmix stereo → 5.1 TO51 / QUAD](#3-stereo251_upmix_psychosh)
-- [4. ASMR / VR Intimate stereo](#4-asmr_vr_intimate_psychosh)
-- [5. Atmos/EAC3 → 5.1 DynNorm + Atmos originale](#5-atmos_to_51_dynaudnorm_volamp_psichosh)
-- [Preset 5.1](#preset-51)
-- [Volamp](#volamp)
-- [Diagrammi pipeline](#diagrammi-pipeline)
-- [Benchmark orientativo](#benchmark-orientativo)
-- [Troubleshooting](#troubleshooting)
-
 ---
 
 ## Requisiti
 
 ### Software
 
-- **FFmpeg 7+** consigliato
+- **FFmpeg 7+** consigliato (con **libsoxr** opzionale per qualità superiore nel resampling)
 - **ffprobe**
 - **Bash 4.x+**
 - **awk** per l'analyzer
@@ -86,12 +70,28 @@ awk --version 2>/dev/null || awk -W version
 | Script | Scopo |
 |---|---|
 | `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, target domestico `-21 LUFS`, fake-5.1 gate e generazione automatica di `run_processing.sh` |
-| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset psicoacustici, taratura JBL SCS200/AVR 100 Hz, voce italiana body-safe, master limiter a 192 kHz |
+| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset psicoacustici, diffusori compatti crossover 110 Hz, voce italiana body-safe, master limiter a 192 kHz |
 | `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 con due preset: `to51` e `quad` |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie, ASMR, VR e sorgenti intime |
 | `atmos_to_51_dynaudnorm_volamp_psicho.sh` | Conversione EAC3 Atmos/JOC → EAC3 5.1 DynNorm con high-pass subsonico + traccia Atmos originale preservata |
 
 > Nota naming: il file Atmos attuale si chiama `psicho` e non `psycho`. Il README usa il nome reale del file, perché Bash non perdona i refusi e non ha mai avuto senso dell'umorismo.
+
+---
+
+## 🚀 Quick Start (TL;DR)
+
+Hai una cartella piena di episodi 5.1 (es. `ac3` o `eac3`) e non vuoi leggere il manuale? 
+
+```bash
+# 1. Analizza la cartella (sceglierà il preset migliore per ogni file)
+./audio_analyzer_volamp_psycho.sh . eac3 no 768k
+
+# 2. Lancia il processing generato
+./run_processing.sh
+```
+Fatto. I tuoi file suoneranno meglio sui dialoghi e saranno bilanciati per il tuo salotto.
+Vuoi sapere cosa è successo sotto il cofano? Continua a leggere.
 
 ---
 
@@ -151,16 +151,6 @@ Niente variabili da esportare prima del lancio: il target domestico `-21.0` è d
 ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
 ```
 
-### Mappa Delta → preset
-
-| Delta | Preset | Interpretazione |
-|---:|---|---|
-| `< -15 dB` | `sonar` | surround molto deboli, ricostruzione psicoacustica |
-| `-15 / -10 dB` | `aura` | surround deboli, allargamento prudente |
-| `-10 / -6 dB` | `wide` | surround medi, scena laterale |
-| `-6 / -2 dB` | `aegis` | surround buoni, controllo e bilanciamento |
-| `> -2 dB` | `voice` | surround forti o centrale coperto, priorità voce |
-
 ### Width MS
 
 `Width MS = I(SIDE) - I(MID)` sui surround.
@@ -184,15 +174,49 @@ Il batch generato contiene comandi di questo tipo:
 
 Il valore finale numerico è il `volamp` consigliato per-file.
 
+### Mappa Delta → preset
+
+| Delta | Preset | Interpretazione |
+|---:|---|---|
+| `< -15 dB` | `sonar` | surround molto deboli, ricostruzione psicoacustica |
+| `-15 / -10 dB` | `aura` | surround deboli, allargamento prudente |
+| `-10 / -6 dB` | `wide` | surround medi, scena laterale |
+| `-6 / -2 dB` | `aegis` | surround buoni, controllo e bilanciamento |
+| `> -2 dB` | `voice` | surround forti o centrale coperto, priorità voce |
+
+### Volamp
+
+`volamp` è un gain finale prudente applicato dal processore **prima del limiter**.
+L'analyzer lo stima usando la loudness integrata del file intero rispetto a un target domestico di **-21.0 LUFS**, ma limita il valore quando la LRA è alta, per rispettare la dinamica cinematografica originale.
+
+Step usati:
+- `0 dB`   -> nessun incremento necessario
+- `1.5 dB` -> lieve recupero loudness
+- `2 dB`   -> boost consigliato
+- `2.5 dB` -> boost massimo prudente
+
 ---
 
 ## 2) `aegis_sonar_wide_aura_voice_volamp_psycho.sh`
 
 Motore principale per tracce **5.1 esistenti**.
 
-Fa processing su centrale e surround, mantenendo LFE coerente con il mix sorgente e lasciando all'AVR/sub il lavoro principale sulle basse. La taratura è ottimizzata per **JBL SCS200 + Yamaha AVR con crossover globale a 100 Hz**.
+Fa processing su centrale e surround, mantenendo LFE coerente con il mix sorgente e lasciando all'AVR/sub il lavoro principale sulle basse. La taratura è ottimizzata per **diffusori compatti con AVR crossover globale a 110 Hz**. *(Baseline hardware: AVR Yamaha RX-4RV, kit JBL SCS200)*
 
-### Taratura JBL SCS200 / AVR 100 Hz
+### Resampler di qualità (SOXR)
+
+Lo script utilizza il resampler **SOXR** (28 bit, cutoff=0.97) per il resampling finale a 192 kHz e 48 kHz, se disponibile in FFmpeg. Se FFmpeg non è compilato con libsoxr, cadrà automaticamente sul resampler fallback (qualità inferiore ma compatibile).
+
+**Verifica disponibilità:**
+```bash
+ffmpeg -hide_banner -h full 2>&1 | grep -i soxr
+```
+
+Se non trovi `soxr` nell'output:
+- **Linux/macOS**: Rebuilda FFmpeg con `./configure --enable-libsoxr ...`
+- **Windows**: Alcuni build pre-compilati includono già SOXR. Verifica il tuo.
+
+### Taratura generale per satelliti compatti
 
 - centrale `FC`: high-pass **102 Hz** Butterworth morbido;
 - frontali `FL/FR`: high-pass **112 Hz**;
@@ -201,6 +225,7 @@ Fa processing su centrale e surround, mantenendo LFE coerente con il mix sorgent
 - air layer psicoacustico a **12/15 ms**, filtrato 1600-9500 Hz;
 - `DECORR_GAIN` ridotti per non mascherare il centrale;
 - high shelf finale leggero a 12 kHz su canali non-LFE;
+- **FRONT_EQ**: EQ psicoacustico opzionale su frontali (−0.8 dB @ 320 Hz, +0.6 dB @ 5000 Hz, +0.7 dB shelf @ 11 kHz; default `g=0.7` sulla shelf per prudenza). Migliora articolazione su driver piccoli senza rubare al centro. Disabilita con `FRONT_EQ="anull"`;
 - master limiter finale con `aresample=192000 -> alimiter -> aresample=48000`.
 
 ### Caratteristiche
@@ -268,7 +293,7 @@ FL/FR restano pieni, il phantom center originale non viene sabotato, il centrale
 - input stereo 2 canali;
 - output AC3/EAC3 5.1(side);
 - preset `to51` e `quad`;
-- taratura JBL SCS200 + AVR Yamaha crossover 100 Hz;
+- taratura per diffusori compatti + AVR crossover 110 Hz;
 - FC assist a 102 Hz;
 - LFE sintetico molto prudente;
 - psicoacustica leggera: delay Haas + allpass/air a basso livello;
@@ -461,106 +486,6 @@ Con tracce:
 ```text
 Traccia 1: EAC3 5.1 – Dynamic Normalized
 Traccia 2: EAC3 Atmos (Original)
-```
-
----
-
-## Preset 5.1
-
-| Preset | Filosofia | Quando usarlo |
-|---|---|---|
-| `voice` | dialoghi in primo piano, surround attenuati | centrale coperto o surround troppo forti/falso 5.1 |
-| `aura` | allargamento prudente e morbido | surround deboli ma non morti |
-| `wide` | scena laterale più ampia | surround medi, serve più apertura |
-| `aegis` | cupola controllata, bilanciamento | surround già buoni ma da rifinire |
-| `sonar` | ricostruzione psicoacustica più energica | surround molto deboli ma reali, scena piatta |
-
----
-
-## Volamp
-
-`volamp` è un gain finale prudente applicato dal processore **prima del limiter**.
-
-L'analyzer lo stima usando la loudness integrata del file intero rispetto a un target domestico di **-21.0 LUFS**, ma limita il valore quando la LRA è alta, perché un mix cinematografico basso e dinamico non è automaticamente un file “da pompare”. Scandaloso, lo so: rispettare la dinamica.
-
-Step usati:
-
-```text
-0 dB   -> nessun incremento necessario
-1.5 dB -> lieve recupero loudness
-2 dB   -> boost consigliato
-2.5 dB -> boost massimo prudente
-```
-
-Esempio manuale:
-
-```bash
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k sonar 1.5
-```
-
----
-
-## Diagrammi pipeline
-
-### Workflow 5.1 standard
-
-```mermaid
-flowchart LR
-    A[File con traccia 5.1] --> B[audio_analyzer_volamp_psycho.sh]
-    B --> C[Delta + preset + volamp]
-    C --> D[run_processing.sh]
-    D --> E[aegis_sonar_wide_aura_voice_volamp_psycho.sh]
-    E --> F[Output AC3/EAC3 processato]
-```
-
-### Workflow lista manuale
-
-```mermaid
-flowchart LR
-    A[2-3 episodi campione] --> B[audio_analyzer --files]
-    B --> C[Preset stagionale o per-file]
-    C --> D[run_processing.sh]
-    D --> E[Processing mirato]
-```
-
-### Workflow stereo → 5.1 TO51
-
-```mermaid
-flowchart LR
-    A[File stereo 2.0] --> B[stereo251_upmix_psycho.sh to51]
-    B --> C[File 5.1 TO51]
-    C --> D[audio_analyzer_volamp_psycho.sh]
-    D --> E[run_processing.sh]
-    E --> F[aegis/sonar/wide/aura/voice]
-    F --> G[Output finale 5.1]
-```
-
-### Workflow stereo → QUAD
-
-```mermaid
-flowchart LR
-    A[File stereo 2.0] --> B[stereo251_upmix_psycho.sh quad]
-    B --> C[5.1 QUAD ponderato]
-```
-
-### Workflow Atmos/EAC3
-
-```mermaid
-flowchart LR
-    A[File EAC3 Atmos/JOC] --> B[atmos_to_51_dynaudnorm_volamp_psicho.sh]
-    B --> C[MKV dual-track: 5.1 DynNorm + Atmos originale]
-    C --> D[audio_analyzer sul core 5.1]
-    D --> E[run_processing.sh]
-    E --> F[Processing 5.1]
-```
-
-### Workflow ASMR / VR
-
-```mermaid
-flowchart LR
-    A[File stereo] --> B[asmr_vr_intimate_psycho.sh]
-    B --> C[BS2B + ITD + EQ prossimità + loudnorm]
-    C --> D[Output stereo cuffie]
 ```
 
 ---

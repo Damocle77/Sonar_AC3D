@@ -4,7 +4,8 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   asmr_vr_intimate.sh - V2 - Marzo 2026                                      │
+# │   asmr_vr_intimate.sh - Giugno 2026                                          │
+# │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Processing binaurale ottimizzato per ASMR / VR / contenuto intimo.         │
 # │   Simula vicinanza della sorgente sonora (20-50cm) con crossfeed BS2B        │
@@ -34,6 +35,13 @@ ok(){   echo -e "${C_OK}  $*"; }
 for _bin in ffmpeg ffprobe; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
+
+# bs2b e' un filtro opzionale (richiede FFmpeg compilato con libbs2b): lo verifichiamo
+# subito per dare un errore chiaro invece di un crash a meta' encoding.
+if ! ffmpeg -hide_banner -filters 2>/dev/null | grep -qw bs2b; then
+  err "Il filtro 'bs2b' non e' disponibile in questo FFmpeg (serve libbs2b). Usa un build completo (es. ffmpeg full)."
+  exit 1
+fi
 
 OUTDIR=""
 KEEP_ORIG=0
@@ -101,6 +109,13 @@ esac
 case "${OUT_CODEC,,}" in
   aac|opus|flac) OUT_CODEC="${OUT_CODEC,,}" ;;
   *) err "Codec '$OUT_CODEC' non valido. Usa aac, opus o flac."; exit 1 ;;
+esac
+
+# Mappa il codec all'encoder FFmpeg reale: l'encoder nativo 'opus' e' experimental
+# e fallisce senza '-strict -2'; 'libopus' e' quello di produzione.
+case "$OUT_CODEC" in
+  opus) A_ENCODER="libopus" ;;
+  *)    A_ENCODER="$OUT_CODEC" ;;
 esac
 
 [[ "$OUT_BITRATE" =~ ^[0-9]+(k|M)?$ ]] || [[ "$OUT_CODEC" == "flac" ]] || { err "Bitrate '$OUT_BITRATE' non valido. Es: 192k, 256k, 320k."; exit 1; }
@@ -278,7 +293,7 @@ for CUR_FILE in "$@"; do
     -map "0:V:0?" -c:v copy
     -map "0:s?" -c:s copy
     -map "0:t?" -c:t copy
-    -map "[aout]" -c:a:0 "$OUT_CODEC" -ac:a:0 2 -ar:a:0 48000
+    -map "[aout]" -c:a:0 "$A_ENCODER" -ac:a:0 2 -ar:a:0 48000
     -metadata:s:a:0 title="VR Intimate (${T}) – BS2B J.Meier"
     -disposition:a:0 default
   )

@@ -3,16 +3,17 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   stereo251_upmix.sh -  TO51 / QUAD - PSYCHO - Giugno 2026                   │
+# │   stereo251_upmix.sh - Giugno 2026                                           │
+# │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Motore di upmix offline da Stereo a 5.1 (EAC3/AC3),                        │
-# │   tarato per JBL SCS200 + AVR Yamaha con crossover globale a 100 Hz.         │
+# │   tarato per satelliti compatti con crossover globale a 100 Hz.              │
 # │                                                                              │
 # │   Filosofia:                                                                 │
 # │     - Due soli preset operativi: to51 e quad.                                │
 # │     - FL/FR restano pieni: il phantom center originale non viene sabotato.   │
 # │     - FC come assist filtrato a 102 Hz, non sostituto dei frontali.          │
-# │     - LFE sintetico molto prudente: l'AVR fa già bass management.            │
+# │     - LFE sintetico molto prudente: il ricevitore fa gia' bass management.   │
 # │     - Rear filtrati per non far parlare gli attori dietro la testa.          │
 # │     - Psicoacustica leggera: delay Haas + allpass/air a basso livello.       │
 # │     - Master limiter finale con upsample 192 kHz per contenere true peaks.   │
@@ -34,6 +35,7 @@ done
 
 usage() {
   cat <<'USAGE'
+--------------------------------------------------------------------------------------
 UTILIZZO:
   ./stereo251_upmix_psycho.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
 
@@ -61,18 +63,20 @@ ESEMPI:
   ./stereo251_upmix_psycho_V8_to51_quad.sh eac3 no 'movie.mkv' 448k to51
   ./stereo251_upmix_psycho_V8_to51_quad.sh eac3 si 'concert.mkv' 640k quad
   ./stereo251_upmix_psycho_V8_to51_quad.sh ac3 no "" 448k to51
+  --------------------------------------------------------------------------------------
 USAGE
   exit 1
 }
 
 [[ $# -lt 2 ]] && usage
 
+# Parametri
 OUT_CODEC="${1:-}"
 KEEP_STEREO="${2:-no}"
 INPUT_FILE="${3:-}"
 BITRATE="${4:-448k}"
 MODE="${5:-to51}"
-
+# Controllo parametri
 case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1;; esac
 [[ "$KEEP_STEREO" =~ ^(si|no)$ ]] || { err "Parametro 2 deve essere 'si' o 'no'"; exit 1; }
 case "$MODE" in to51|quad) ;; *) err "Preset '$MODE' non valido. Usa to51 o quad."; exit 1;; esac
@@ -93,6 +97,7 @@ unset _br_num _br_sfx
 info "Upmix Mode:     ${MODE^^}"
 info "Codec target:   ${OUT_CODEC^^} @ ${BITRATE}"
 
+# Funzione per confermare sovrascrittura file
 confirm_overwrite() {
   local target="$1"
   local ans=""
@@ -127,7 +132,7 @@ pick_best_stereo_stream() {
   raw_data="${raw_data//$'\r'/}"
 
   [[ -z "$raw_data" ]] && return 1
-
+  # Score-based selection
   local best_line="" best_score=-1
   local lines
   mapfile -t lines <<< "$raw_data"
@@ -138,7 +143,7 @@ pick_best_stereo_stream() {
     ch="${ch:-0}"
     def="${def:-0}"
     lang="${lang:-}"
-
+    # Score calculation
     local score=0
     [[ "$ch" =~ ^[0-9]+$ && "$ch" -eq 2 ]] && score=$((score + 1000))
     [[ "$def" == "1" ]] && score=$((score + 200))
@@ -168,6 +173,7 @@ else
   shopt -u nullglob
 fi
 
+# Filtra i file gia' upmixati
 FILTERED_FILES=()
 for f in "${FILES[@]}"; do
   case "$f" in
@@ -206,7 +212,7 @@ case "$MODE" in
     FC_LP="${FC_LP:-5800}"
     FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.9,equalizer=f=620:t=q:w=1.0:g=-0.5,equalizer=f=1750:t=q:w=1.5:g=0.5,equalizer=f=2550:t=q:w=1.25:g=0.8,equalizer=f=3700:t=q:w=1.7:g=0.5,equalizer=f=5800:t=q:w=1.8:g=-0.8}"
 
-    # LFE sintetico molto prudente: il sub riceve gia' bass management dall'AVR.
+    # LFE sintetico molto prudente: il sub riceve gia' bass management dal ricevitore.
     LFE_VOL="${LFE_VOL:-0.10}"
 
     # Rear: side matrix + piccolo rear bed decorrelato.
@@ -217,6 +223,7 @@ case "$MODE" in
     BED_DELAY_L="${BED_DELAY_L:-28}"
     BED_DELAY_R="${BED_DELAY_R:-38}"
 
+    # Psicoacustica leggera: allpass + air a basso livello.
     SUR_EQ="highpass=f=150:t=q:w=0.707,lowpass=f=9000,equalizer=f=5200:t=q:w=1.4:g=0.5,equalizer=f=7200:t=q:w=2.0:g=-0.6"
     BED_EQ="highpass=f=230:t=q:w=0.707,lowpass=f=6500,equalizer=f=950:t=q:w=1.2:g=-1.2,equalizer=f=1800:t=q:w=1.4:g=-4.0,equalizer=f=3000:t=q:w=1.6:g=-3.4,equalizer=f=5200:t=q:w=1.8:g=0.3"
     MODE_TITLE="V8 TO51 Psycho Controlled"
@@ -232,7 +239,7 @@ case "$MODE" in
     FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.7,equalizer=f=650:t=q:w=1.0:g=-0.4,equalizer=f=1800:t=q:w=1.5:g=0.4,equalizer=f=2600:t=q:w=1.25:g=0.6,equalizer=f=3600:t=q:w=1.7:g=0.4,equalizer=f=5200:t=q:w=1.8:g=-0.8}"
 
     LFE_VOL="${LFE_VOL:-0.08}"
-
+    # Rear: quadrifonia con delay Haas, banda limitata e volume prudente.
     QUAD_DELAY_L="${QUAD_DELAY_L:-16}"
     QUAD_DELAY_R="${QUAD_DELAY_R:-19}"
     QUAD_VOL="${QUAD_VOL:-0.58}"
@@ -254,24 +261,17 @@ else
   info "Rear air:       vol ${QUAD_AIR_VOL}"
 fi
 
+# Nei valori sostituiti via ${var//pat/rep} l'unico carattere speciale del testo di
+# rimpiazzo e' '&' (che ridiventa il match) e '\'. I parametri numerici non li contengono;
+# esc_rep blinda i valori-stringa (catene EQ) eventualmente sovrascritti da ambiente.
+esc_rep() { local s="${1//\\/\\\\}"; printf '%s' "${s//&/\\&}"; }
+
+# Costruzione filtergraph per upmix 2.0 -> 5.1
+# Placeholder sostituiti con espansione nativa bash (${var//pat/rep}): niente delimitatori
+# come in sed; i valori-stringa EQ passano da esc_rep per restare letterali al 100%.
 build_to51_filter() {
-  cat <<'FILTER_EOF' | sed \
-    -e "s|__A_STREAM_INDEX__|${A_STREAM_INDEX}|g" \
-    -e "s|__FRONT_VOL__|${FRONT_VOL}|g" \
-    -e "s|__FC_MIX__|${FC_MIX}|g" \
-    -e "s|__FC_HP__|${FC_HP}|g" \
-    -e "s|__FC_LP__|${FC_LP}|g" \
-    -e "s|__FC_EQ__|${FC_EQ}|g" \
-    -e "s|__FC_VOL__|${FC_VOL}|g" \
-    -e "s|__LFE_VOL__|${LFE_VOL}|g" \
-    -e "s|__SUR_PAN__|${SUR_PAN}|g" \
-    -e "s|__SUR_DELAY__|${SUR_DELAY}|g" \
-    -e "s|__SUR_EQ__|${SUR_EQ}|g" \
-    -e "s|__SUR_VOL__|${SUR_VOL}|g" \
-    -e "s|__BED_DELAY_L__|${BED_DELAY_L}|g" \
-    -e "s|__BED_DELAY_R__|${BED_DELAY_R}|g" \
-    -e "s|__BED_EQ__|${BED_EQ}|g" \
-    -e "s|__SUR_BED_VOL__|${SUR_BED_VOL}|g"
+  local tpl
+  tpl=$(cat <<'FILTER_EOF'
 [0:__A_STREAM_INDEX__]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,asplit=4[lr][fcsrc][lfe_src][rear_src];
 [lr]channelsplit=channel_layout=stereo[FL_raw][FR_raw];
 [FL_raw]equalizer=f=8200:t=q:w=1.2:g=0.20,volume=__FRONT_VOL__[FL_out];
@@ -291,24 +291,31 @@ build_to51_filter() {
 [SR_side][SR_bed]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
 [FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000,alimiter=limit=0.97:attack=3.0:release=60:level=0,aresample=48000[aout]
 FILTER_EOF
+)
+  tpl="${tpl//__A_STREAM_INDEX__/$A_STREAM_INDEX}"
+  tpl="${tpl//__FRONT_VOL__/$FRONT_VOL}"
+  tpl="${tpl//__FC_MIX__/$FC_MIX}"
+  tpl="${tpl//__FC_HP__/$FC_HP}"
+  tpl="${tpl//__FC_LP__/$FC_LP}"
+  tpl="${tpl//__FC_EQ__/$(esc_rep "$FC_EQ")}"
+  tpl="${tpl//__FC_VOL__/$FC_VOL}"
+  tpl="${tpl//__LFE_VOL__/$LFE_VOL}"
+  tpl="${tpl//__SUR_PAN__/$SUR_PAN}"
+  tpl="${tpl//__SUR_DELAY__/$SUR_DELAY}"
+  tpl="${tpl//__SUR_EQ__/$(esc_rep "$SUR_EQ")}"
+  tpl="${tpl//__SUR_VOL__/$SUR_VOL}"
+  tpl="${tpl//__BED_DELAY_L__/$BED_DELAY_L}"
+  tpl="${tpl//__BED_DELAY_R__/$BED_DELAY_R}"
+  tpl="${tpl//__BED_EQ__/$(esc_rep "$BED_EQ")}"
+  tpl="${tpl//__SUR_BED_VOL__/$SUR_BED_VOL}"
+  printf '%s\n' "$tpl"
 }
 
+# Costruzione filtergraph per upmix 2.0 -> 4.0 quadrifonia
+# Placeholder sostituiti con espansione nativa bash (vedi build_to51_filter).
 build_quad_filter() {
-  cat <<'FILTER_EOF' | sed \
-    -e "s|__A_STREAM_INDEX__|${A_STREAM_INDEX}|g" \
-    -e "s|__FRONT_VOL__|${FRONT_VOL}|g" \
-    -e "s|__FC_MIX__|${FC_MIX}|g" \
-    -e "s|__FC_HP__|${FC_HP}|g" \
-    -e "s|__FC_LP__|${FC_LP}|g" \
-    -e "s|__FC_EQ__|${FC_EQ}|g" \
-    -e "s|__FC_VOL__|${FC_VOL}|g" \
-    -e "s|__LFE_VOL__|${LFE_VOL}|g" \
-    -e "s|__QUAD_DELAY_L__|${QUAD_DELAY_L}|g" \
-    -e "s|__QUAD_DELAY_R__|${QUAD_DELAY_R}|g" \
-    -e "s|__QUAD_HP__|${QUAD_HP}|g" \
-    -e "s|__QUAD_LP__|${QUAD_LP}|g" \
-    -e "s|__QUAD_VOL__|${QUAD_VOL}|g" \
-    -e "s|__QUAD_AIR_VOL__|${QUAD_AIR_VOL}|g"
+  local tpl
+  tpl=$(cat <<'FILTER_EOF'
 [0:__A_STREAM_INDEX__]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=stereo,asplit=3[lr][fcsrc][lfe_src];
 [lr]channelsplit=channel_layout=stereo[FL_raw][FR_raw];
 [FL_raw]asplit=2[FL_front_in][FL_quad_in];
@@ -329,6 +336,22 @@ build_quad_filter() {
 [SR_main][SR_air]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
 [FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000,alimiter=limit=0.97:attack=3.0:release=60:level=0,aresample=48000[aout]
 FILTER_EOF
+)
+  tpl="${tpl//__A_STREAM_INDEX__/$A_STREAM_INDEX}"
+  tpl="${tpl//__FRONT_VOL__/$FRONT_VOL}"
+  tpl="${tpl//__FC_MIX__/$FC_MIX}"
+  tpl="${tpl//__FC_HP__/$FC_HP}"
+  tpl="${tpl//__FC_LP__/$FC_LP}"
+  tpl="${tpl//__FC_EQ__/$(esc_rep "$FC_EQ")}"
+  tpl="${tpl//__FC_VOL__/$FC_VOL}"
+  tpl="${tpl//__LFE_VOL__/$LFE_VOL}"
+  tpl="${tpl//__QUAD_DELAY_L__/$QUAD_DELAY_L}"
+  tpl="${tpl//__QUAD_DELAY_R__/$QUAD_DELAY_R}"
+  tpl="${tpl//__QUAD_HP__/$QUAD_HP}"
+  tpl="${tpl//__QUAD_LP__/$QUAD_LP}"
+  tpl="${tpl//__QUAD_VOL__/$QUAD_VOL}"
+  tpl="${tpl//__QUAD_AIR_VOL__/$QUAD_AIR_VOL}"
+  printf '%s\n' "$tpl"
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -338,7 +361,7 @@ OVERWRITE_ALL=false
 
 for CUR_FILE in "${FILES[@]}"; do
   info "Elaborazione: $CUR_FILE"
-
+  # Seleziona lo stream audio stereo migliore (score-based)
   PROBE_RESULT=$(pick_best_stereo_stream "$CUR_FILE") || { warn "Nessuna traccia audio trovata. Salto."; continue; }
   IFS='|' read -r A_STREAM_INDEX A_CHANNELS A_LANG <<<"$PROBE_RESULT"
 
@@ -349,6 +372,7 @@ for CUR_FILE in "${FILES[@]}"; do
 
   info "Stream [$A_STREAM_INDEX]: ${A_CHANNELS}ch, lingua: ${A_LANG:-und}"
 
+  # Costruzione filtergraph
   if [[ "$MODE" == "to51" ]]; then
     UPMIX_FILTER="$(build_to51_filter)"
   else
@@ -357,6 +381,7 @@ for CUR_FILE in "${FILES[@]}"; do
 
   OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_V8_${MODE^^}.mkv"
 
+  # Controllo sovrascrittura
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
       confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; continue; }
@@ -364,7 +389,7 @@ for CUR_FILE in "${FILES[@]}"; do
       info "Sovrascrittura automatica di '$OUT_FILE'..."
     fi
   fi
-
+  # Costruzione comando ffmpeg
   CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning)
   [[ -f "$OUT_FILE" ]] && CMD+=( -y )
   CMD+=(
@@ -384,7 +409,7 @@ for CUR_FILE in "${FILES[@]}"; do
            -metadata:s:a:1 title="Stereo Originale 2.0"
            -disposition:a:1 0 )
   fi
-
+  # Aggiunge metadata lingua se disponibile e diversa da "und"
   [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]] && CMD+=( -metadata:s:a:0 language="$A_LANG" )
 
   CMD+=( "$OUT_FILE" )

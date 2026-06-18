@@ -3,14 +3,14 @@
 set -uo pipefail
 
 # ╭─────────────────────────────────────────────────────────────────────────────────╮
-# │   audio_analyzer_delta.sh - DELTA/VOLAMP/FILES/AUTORUN - Maggio 2026            │
+# │   audio_analyzer_volamp_psycho.sh - Giugno 2026                                 │
+# │   By Sandro (D@mocle77) Sabbioni                                                │
 # │                                                                                 │
 # │   Sonda euristica per l'analisi offline di container multimediali 5.1.          │
 # │   Misura il bilanciamento surround/centro e genera run_processing.sh            │
 # │   per il processore aegis_sonar_wide_aura_voice_volamp_psycho.sh.               │
 # │                                                                                 │
-# │   METRICA UNICA: DELTA                                                          │
-# │                                                                                 │
+# │   METRICA UNICA: DELTA                                                          │                                                                             │
 # │   Delta = I(SUR) - I(FC) in dB                                                  │
 # │     - I(FC)  = loudness integrata del canale centrale                           │
 # │     - I(SUR) = media energetica dei surround SL/SR o BL/BR                      │
@@ -20,8 +20,8 @@ set -uo pipefail
 # │   quanto la scena surround e' arretrata rispetto al parlato.                    │
 # │                                                                                 │
 # │   MAPPA PRESET (delta):                                                         │
-# │     Delta < -15 dB       -> SONAR  (surround molto deboli, ricostruzione)       │
-# │     Delta -15/-10 dB     -> AURA   (surround deboli, allargamento prudente)     │
+# │     Delta < -13 dB       -> SONAR  (foldown molto schiacciato, ri-espansione)   │
+# │     Delta -13/-10 dB     -> AURA   (surround deboli, allargamento prudente)     │
 # │     Delta -10/-6 dB      -> WIDE   (surround medi, scena laterale)              │
 # │     Delta -6/-2 dB       -> AEGIS  (surround buoni, controllo/bilanciamento)    │
 # │     Delta > -2 dB        -> VOICE  (sur forti o centro coperto)                 │
@@ -48,11 +48,17 @@ for _bin in ffmpeg ffprobe awk; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
 
+# Directory temporanea unica per i log ebur128: ripulita anche su interruzione (Ctrl-C),
+# importante su Git Bash/Windows dove i temp orfani danno piu' fastidio.
+ANALYZER_TMPDIR="$(mktemp -d 2>/dev/null || mktemp -d -t analyzer)"
+trap 'rm -rf "$ANALYZER_TMPDIR"' EXIT INT TERM
+
 usage() {
   cat <<'USAGE'
+----------------------------------------------------------------------------------------------------
 UTILIZZO:
-  ./audio_analyzer_delta.sh <file|directory|""> [codec] [keep] [bitrate]
-  ./audio_analyzer_delta.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]
+  ./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate]
+  ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]
 
 MODALITA' INPUT:
   file      : Analizza un singolo file multimediale.
@@ -83,11 +89,12 @@ VOLAMP HEURISTIC:
   il volamp viene limitato per non schiacciare un mix cinematografico sano.
 
 ESEMPI:
-  ./audio_analyzer_delta.sh "film.mkv"                    # Singolo file, default eac3/no/448k
-  ./audio_analyzer_delta.sh "film.mkv" eac3 si 768k       # Singolo file + run_processing.sh
-  ./audio_analyzer_delta.sh "" eac3 no 448k               # Cartella corrente + run_processing.sh
-  ./audio_analyzer_delta.sh . eac3 si 768k                
-  ./audio_analyzer_delta.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
+  ./audio_analyzer_volamp_psycho.sh "film.mkv"            # Singolo file, default eac3/no/448k
+  ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k       # Singolo file + run_processing.sh
+  ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k               # Cartella corrente + run_processing.sh
+  ./audio_analyzer_volamp_psycho.sh . eac3 si 768k                
+  ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
+----------------------------------------------------------------------------------------------------
 USAGE
   exit 1
 }
@@ -102,7 +109,7 @@ if [[ "${1:-}" == "--files" ]]; then
   MULTI_FILES_MODE=true
 
   if (( $# < 5 )); then
-    err "Uso --files non valido. Sintassi: ./audio_analyzer_delta.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]"
+    err "Uso --files non valido. Sintassi: ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]"
     usage
   fi
 
@@ -142,8 +149,19 @@ LOUDNESS_TARGET="-21.0"
 # come falso 5.1 / front-heavy e forziamo un preset conservativo.
 FAKE_SUR_GATE="-60.0"
 
+# A Delta > -2 dB i surround sono forti rispetto al centro: due casi opposti.
+# Se la loudness ASSOLUTA del centro e' >= a questa soglia -> buon mix immersivo (AEGIS).
+# Se e' piu' bassa -> dialogo davvero coperto -> VOICE. Disambigua VOICE vs AEGIS.
+VOICE_FC_GATE="-27.0"
+
+# Width Mid/Side sotto questa soglia = surround collassati/stretti (poca separazione L/R).
+# In quel caso, a parita' di Delta, una ricostruzione laterale (WIDE) rende di piu'
+# di AURA/AEGIS. Non tocca SONAR (deficit estremo) ne' VOICE.
+WIDTH_WIDE_GATE="-7.0"
+
 info "Target loudness analitico: ${LOUDNESS_TARGET} LUFS"
 info "Fake 5.1 gate surround: ${FAKE_SUR_GATE} LUFS"
+info "Voice/Aegis gate centro: ${VOICE_FC_GATE} LUFS | Width->Wide gate: ${WIDTH_WIDE_GATE} dB"
 
 # Variabili globali per il verdetto stagionale
 GLOBAL_METRIC_VALUES=()
@@ -290,32 +308,69 @@ pick_best_stream() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Mappa Delta -> Preset
+# Colore ANSI associato a un preset (per display coerente quando si parte dal nome).
 # ────────────────────────────────────────────────────────────────────────────────
-delta_to_preset() {
-  local d="$1"
-  local is_sonar is_aura is_wide is_aegis
-  is_sonar=$(awk -v d="$d" 'BEGIN { print (d < -15.0) ? 1 : 0 }')
-  is_aura=$(awk -v d="$d" 'BEGIN { print (d >= -15.0 && d < -10.0) ? 1 : 0 }')
-  is_wide=$(awk -v d="$d" 'BEGIN { print (d >= -10.0 && d < -6.0) ? 1 : 0 }')
-  is_aegis=$(awk -v d="$d" 'BEGIN { print (d >= -6.0 && d <= -2.0) ? 1 : 0 }')
-
-  if   [[ "$is_sonar" -eq 1 ]]; then echo "SONAR|\033[1;36m"
-  elif [[ "$is_aura"  -eq 1 ]]; then echo "AURA|\033[1;35m"
-  elif [[ "$is_wide"  -eq 1 ]]; then echo "WIDE|\033[1;32m"
-  elif [[ "$is_aegis" -eq 1 ]]; then echo "AEGIS|\033[1;31m"
-  else                                  echo "VOICE|\033[1;33m"
-  fi
+preset_color() {
+  case "$1" in
+    SONAR) echo "\033[1;36m" ;;
+    AURA)  echo "\033[1;35m" ;;
+    WIDE)  echo "\033[1;32m" ;;
+    AEGIS) echo "\033[1;31m" ;;
+    VOICE) echo "\033[1;33m" ;;
+    *)     echo "\033[1;37m" ;;
+  esac
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Misura Loudness Integrata (I:) dell'intero stream target
-# Args: file stream_index
+# Classificazione preset in UN solo awk (meno subprocess: rilevante su Git Bash).
+#   d     = Delta SUR-FC (obbligatorio)
+#   i_fc  = loudness assoluta del centro (opz.): disambigua VOICE vs AEGIS a Delta>-2
+#   width = width Mid/Side dei surround (opz.): se collassati -> WIDE (ricostr. laterale)
+# Output: "PRESET|<colore-ansi>"
 # ────────────────────────────────────────────────────────────────────────────────
-measure_stream_loudness() {
+classify_preset() {
+  local d="$1" i_fc="${2:-}" width="${3:-}"
+  awk -v d="$d" -v fc="$i_fc" -v w="$width" \
+      -v fcgate="$VOICE_FC_GATE" -v wgate="$WIDTH_WIDE_GATE" 'BEGIN {
+    d += 0;
+    preset="VOICE"; color="\033[1;33m";
+    if      (d < -13.0) { preset="SONAR"; color="\033[1;36m"; }
+    else if (d < -10.0) { preset="AURA";  color="\033[1;35m"; }
+    else if (d <  -6.0) { preset="WIDE";  color="\033[1;32m"; }
+    else if (d <= -2.0) { preset="AEGIS"; color="\033[1;31m"; }
+    else {
+      # Delta > -2: surround forti. Centro sano in assoluto -> buon mix (AEGIS),
+      # altrimenti dialogo davvero coperto -> VOICE.
+      if (fc != "" && (fc+0) >= (fcgate+0)) { preset="AEGIS"; color="\033[1;31m"; }
+      else                                  { preset="VOICE"; color="\033[1;33m"; }
+    }
+    # Surround collassati/stretti: a parita di Delta una ricostruzione laterale
+    # (WIDE) rende piu di AURA/AEGIS. Non tocca SONAR (deficit estremo) ne VOICE.
+    if (w != "" && (w+0) < (wgate+0)) {
+      if (preset=="AURA" || preset=="AEGIS") { preset="WIDE"; color="\033[1;32m"; }
+    }
+    printf "%s|%s", preset, color;
+  }'
+}
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Mappa Delta -> Preset (wrapper sola-Delta: usato per il verdetto stagionale P25,
+# dove non esistono i_fc/width aggregati). Per-file si usa classify_preset completo.
+# ────────────────────────────────────────────────────────────────────────────────
+delta_to_preset() {
+  classify_preset "$1"
+}
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Misura Loudness Integrata (I:) e LRA dell'intero stream in UN SOLO passaggio.
+# ebur128 emette sia I: che LRA: nello stesso log: niente doppia decodifica
+# (rilevante su Git Bash/Windows, dove ogni pass ffmpeg costa di piu').
+# Args: file stream_index | Output: "I|LRA" (campi vuoti se non misurabili)
+# ────────────────────────────────────────────────────────────────────────────────
+measure_stream_i_lra() {
   local f="$1" stream="$2"
   local log_file
-  log_file=$(mktemp)
+  log_file=$(mktemp -p "$ANALYZER_TMPDIR")
 
   ffmpeg -y -nostdin -hide_banner -nostats \
     -i "$f" \
@@ -324,11 +379,12 @@ measure_stream_loudness() {
     -vn -sn -f null - \
     >/dev/null 2>"$log_file" </dev/null || true
 
-  local i_val
+  local i_val lra_val
   i_val=$(grep -E "^\s+I:\s+-?[0-9]" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
+  lra_val=$(grep -E "^\s+LRA:\s+-?[0-9]" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
   rm -f "$log_file"
 
-  echo "${i_val:-}"
+  echo "${i_val:-}|${lra_val:-}"
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -377,27 +433,8 @@ source_volume_status() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Misura LRA (solo per cap volamp, non per scelta preset)
-# Args: file stream_index
+# (LRA ora misurata insieme a I: in measure_stream_i_lra, un solo passaggio ebur128)
 # ────────────────────────────────────────────────────────────────────────────────
-measure_stream_lra() {
-  local f="$1" stream="$2"
-  local log_file
-  log_file=$(mktemp)
-
-  ffmpeg -y -nostdin -hide_banner -nostats \
-    -i "$f" \
-    -map "0:${stream}" \
-    -af "ebur128=framelog=verbose" \
-    -vn -sn -f null - \
-    >/dev/null 2>"$log_file" </dev/null || true
-
-  local lra_val
-  lra_val=$(grep -E "^\s+LRA:\s+-?[0-9]" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
-  rm -f "$log_file"
-
-  echo "${lra_val:-}"
-}
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Limita il volamp se il file ha dinamica alta.
@@ -445,7 +482,7 @@ width_to_desc() {
 measure_channel_loudness() {
   local f="$1" stream="$2" pan_formula="$3"
   local log_file
-  log_file=$(mktemp)
+  log_file=$(mktemp -p "$ANALYZER_TMPDIR")
 
   ffmpeg -y -nostdin -hide_banner -nostats \
     -i "$f" \
@@ -511,7 +548,7 @@ scan_delta() {
   fi
 
   local i_sur delta
-  _delta_tmp=$(mktemp)
+  _delta_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
   awk -v sl="$i_sl" -v sr="$i_sr" -v fc="$i_fc" 'BEGIN { sur=-10*log(((10^(sl/-10))+(10^(sr/-10)))/2)/log(10); d=sur-fc; printf "%.1f %.1f\n",sur,d }' < /dev/null > "$_delta_tmp"
   read -r i_sur delta < "$_delta_tmp"
   rm -f "$_delta_tmp"
@@ -536,8 +573,10 @@ scan_delta() {
   fi
 
   local i_full lra_full volamp_raw volamp volamp_desc volume_status volamp_note
-  i_full=$(measure_stream_loudness "$f" "$target_stream")
-  lra_full=$(measure_stream_lra "$f" "$target_stream")
+  local _i_lra
+  _i_lra=$(measure_stream_i_lra "$f" "$target_stream")
+  i_full="${_i_lra%%|*}"
+  lra_full="${_i_lra##*|}"
   volamp_raw=$(loudness_to_volamp "$i_full")
   volamp=$(cap_volamp_by_lra "$volamp_raw" "$lra_full")
   volamp_desc=$(volamp_to_desc "$volamp")
@@ -549,7 +588,7 @@ scan_delta() {
   if [[ "$forced_preset" -eq 1 ]]; then
     preset_raw="VOICE|\033[1;33m"
   else
-    preset_raw=$(delta_to_preset "$delta")
+    preset_raw=$(classify_preset "$delta" "$i_fc" "$width_ms")
   fi
   local preset="${preset_raw%%|*}"
   local p_color="${preset_raw##*|}"
@@ -608,10 +647,10 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   HIGH_SPREAD=0
 
   if [[ "$CNT" -gt 1 ]]; then
-    _vals_tmp=$(mktemp)
+    _vals_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
     printf '%s\n' "${GLOBAL_METRIC_VALUES[@]}" > "$_vals_tmp"
 
-    _stats_tmp=$(mktemp)
+    _stats_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
     awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; mn=v[1];mx=v[n]; s=0;for(i=1;i<=n;i++)s+=v[i]; avg=s/n; raw=0.25*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; pctl=v[rank]; printf "%.1f %.1f %.1f %.1f\n",mn,mx,avg,pctl}' "$_vals_tmp" > "$_stats_tmp"
 
     read -r m_min m_max m_avg m_pctl < "$_stats_tmp"
@@ -655,7 +694,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     fi
 
     if [[ ${#GLOBAL_VOLAMP_VALUES[@]} -gt 0 ]]; then
-      _volamp_tmp=$(mktemp)
+      _volamp_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
       printf '%s\n' "${GLOBAL_VOLAMP_VALUES[@]}" > "$_volamp_tmp"
       season_volamp=$(awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; raw=0.75*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; printf "%.1f",v[rank]}' "$_volamp_tmp")
       rm -f "$_volamp_tmp"
@@ -668,13 +707,8 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       echo -e "  \033[0;33m   Per risultati ottimali, considera i preset per-file:\033[0m"
       echo ""
       for (( i=0; i<CNT; i++ )); do
-        if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" ]]; then
-          pf_raw="VOICE|\033[1;33m"
-        else
-          pf_raw=$(delta_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
-        fi
-        pf_preset="${pf_raw%%|*}"
-        pf_color="${pf_raw##*|}"
+        pf_preset="${GLOBAL_PRESET_VALUES[$i]}"
+        pf_color="$(preset_color "$pf_preset")"
         fname="${GLOBAL_METRIC_FILES[$i]}"
         (( ${#fname} > 50 )) && fname="${fname:0:47}..."
         printf "    %-50s  %b%-5s\033[0m  (%s dB)\n" "$fname" "$pf_color" "$pf_preset" "${GLOBAL_METRIC_VALUES[$i]}"
@@ -689,7 +723,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     echo '#!/usr/bin/env bash'
     echo "# ── Batch generato da audio_analyzer_delta (V4.6 DELTA/VOLAMP/FILES/AUTORUN) ──"
     echo "# Data: $(date '+%Y-%m-%d %H:%M')"
-    echo "# Metrica: DELTA | Percentile: P25 (audiofilo)"
+    echo "# Metrica: DELTA (+ raffinamento width / I(FC)) | Percentile: P25 (audiofilo)"
     echo '#'
     echo '# Modifica le variabili sotto se necessario, poi lancia:'
     echo "#   ./${BATCH_FILE}"
@@ -713,11 +747,10 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       esac
 
       file_preset=""
-      if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" ]]; then
+      if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" || "$HIGH_SPREAD" -eq 1 ]]; then
+        # Forzato (fake 5.1) o stagione eterogenea: uso il preset raffinato per-file
+        # gia' calcolato in scan_delta (include disambiguazione width / I(FC)).
         file_preset="${GLOBAL_PRESET_VALUES[$i]}"
-      elif [[ "$HIGH_SPREAD" -eq 1 ]]; then
-        pf_raw=$(delta_to_preset "${GLOBAL_METRIC_VALUES[$i]}")
-        file_preset="${pf_raw%%|*}"
       else
         file_preset="$season_preset"
       fi

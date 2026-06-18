@@ -3,21 +3,21 @@
 # La gestione errori è esplicita nei punti critici (|| continue, || true, etc.)
 set -uo pipefail
 
-# ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   aegis_sonar_wide_aura_voice_volamp.sh - GOD TIER EDITION - Giugno 2026     │
-# │   by D@mocle77                                                               │
-# │   Motore di processing audio offline per tracce 5.1 (EAC3/AC3).              │
-# │   Corregge dinamicamente mix sbilanciati tramite preset psicoacustici,       │
-# │   migliorando l'intelligibilità dei dialoghi e ripristinando la bolla        │
-# │   surround (Aegis, Sonar, Wide, Aura), con controllo mirato dei picchi LFE.  │
-# │                                                                              │
-# │   READABILITY REFACTOR:                                                      │
-# │   - DSP ottimizzato per JBL SCS200 / AVR crossover 100 Hz                    │
-# │   - Voce italiana: intelligibilità a basso volume senza perdere corpo        │
-# │   - Surround psicoacustici controllati                                       │
-# │   - LFE peak-control dedicato: sub presente, ma meno assassino nei picchi    │
-# │   - Pipeline leggibile: input -> split -> voice -> surround -> output        │
-# ╰──────────────────────────────────────────────────────────────────────────────╯
+# ╭──────────────────────────────────────────────────────────────────────────────────╮
+# │   aegis_sonar_wide_aura_voice_volamp_psycho.sh - Giugno 2026                     │
+# │   By Sandro (D@mocle77) Sabbioni                                                 │
+# │                                                                                  │
+# │   Motore di processing audio offline per tracce 5.1 (EAC3/AC3).                  │
+# │   Corregge dinamicamente mix sbilanciati tramite preset psicoacustici,           │
+# │   migliorando l'intelligibilità dei dialoghi e ripristinando la bolla            │
+# │   surround (Aegis, Sonar, Wide, Aura), con controllo mirato dei picchi LFE.      │
+# │                                                                                  │
+# │   - DSP ottimizzato per satelliti compatti, crossover 110-120 Hz (tutti Small)   │
+# │   - Voce: compressore dinamico FC per intelligibilità a basso volume             │
+# │   - Surround psicoacustici controllati                                           │
+# │   - LFE: lowpass 120 Hz + compressore picchi + limiter di sicurezza              │
+# │   - Pipeline leggibile: input -> split -> voice -> surround -> output            │
+# ╰──────────────────────────────────────────────────────────────────────────────────╯
 
 # Color codes per log: info, warning, error, ok. Usati per distinguere i livelli di messaggio in console.
 C_INFO="\033[0;36m[INFO]\033[0m"
@@ -31,6 +31,25 @@ warn(){ echo -e "${C_WARN} $*"; }
 err(){  echo -e "${C_ERR}  $*"; }
 ok(){   echo -e "${C_OK}  $*"; }
 
+# ── DECORR_GAIN: "aria" di ri-espansione del foldown Atmos->5.1, per preset. ──
+# Curva MONOTONA col grado di collasso dei surround: piu' il foldown e' schiacciato
+# (Delta molto negativo) piu' ri-espansione serve. Modifica qui per il tuning fine.
+#   SONAR (collasso max) > AURA > WIDE > AEGIS (surround gia' pieni) > VOICE (off).
+DECORR_GAIN_SONAR="0.055"
+DECORR_GAIN_AURA="0.048"
+DECORR_GAIN_WIDE="0.042"
+DECORR_GAIN_AEGIS="0.034"
+DECORR_GAIN_VOICE="0"
+
+# ── FRONT_EQ: rifinitura dei frontali (FL/FR), condivisa da tutti i preset. ──
+# Obiettivo: piu' presenza/dettaglio senza rubare scena al centrale. Filosofia
+# principalmente sottrattiva, tarata per satelliti compatti (driver di piccolo diametro).
+#   -0.8 dB @ 320 Hz  -> toglie impasto/congestione low-mid (piu' articolato)
+#   +0.6 dB @ 5000 Hz -> presenza/incisivita' SOPRA la banda dialoghi (1-4 kHz)
+#   +1.2 dB shelf 11k -> aria e dettaglio in alto (dove i satelliti calano)
+# Per disattivarla: FRONT_EQ="anull". Per tarare, modifica solo questa riga.
+FRONT_EQ="equalizer=f=320:t=q:w=1.1:g=-0.8,equalizer=f=5000:t=q:w=1.4:g=0.6,highshelf=f=11000:t=q:w=0.7:g=0.7"
+
 # Controllo dipendenze: ffmpeg e ffprobe sono essenziali per il funzionamento dello script. Se non sono nel PATH, esco con errore.
 for _bin in ffmpeg ffprobe; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
@@ -38,9 +57,9 @@ done
 
 usage() {
   cat <<'USAGE'
-────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+---------------------------------------------------------------------------------------------------------
 UTILIZZO:
-  ./aegis_sonar_wide_aura_voice_volamp.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
+  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
 
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
@@ -58,7 +77,7 @@ PRESET DISPONIBILI:
   wide      -> Simula Dolby 7.1         | Allargamento Laterale
   aura      -> Simula Dolby 6.1         | Allargamento Posteriore
   voice     -> Esalta i dialoghi (FC)   | EQ Sartoriale Voce
-──────────────────────────────────────────────────────────────────────────────────────────────────────────
+---------------------------------------------------------------------------------------------------------
 USAGE
   exit 1
 }
@@ -153,6 +172,10 @@ case "$VOLAMP_DB" in
     ;;
 esac
 
+# Resampling finale HQ con SoX Resampler / SOXR. Precisione 28 bit, cutoff conservativo.
+ARESAMPLE_192K="aresample=192000:resampler=soxr:precision=28:cutoff=0.97"
+ARESAMPLE_48K="aresample=48000:resampler=soxr:precision=28:cutoff=0.97"
+
 # Descrizioni preset per log: non sono parte del processing, ma aiutano a capire cosa fa ogni preset senza dover leggere il codice.
 case "$SUR_MODE" in
   aegis) DESC="Simula NEURAL:X (DTS:X) | Cupola Sonora" ;;
@@ -235,11 +258,13 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # BLOCCHI VOCE
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-# Processing voce: HPF centrale a 102 Hz + EQ parametrico con boost/cut mirati.
+# Processing voce: HPF centrale a 102 Hz + EQ parametrico con boost/cut mirati + compressore dinamico.
 # Obiettivo: dialoghi più leggibili senza effetto megafono, con controllo statico delle sibilanti.
+# Il compressore (threshold=-20dB, ratio=2.5) solleva il parlato debole/sussurrato senza toccare i picchi,
+# ottimizzato per ascolto a basso volume e distanze >3 m. Compatibile con dynaudnorm upstream (makeup contenuto).
 
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
-[FC]highpass=f=102:t=q:w=0.707,equalizer=f=220:t=q:w=1.4:g=-0.8,equalizer=f=350:t=q:w=1.4:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_pre];
+[FC]highpass=f=102:t=q:w=0.707,equalizer=f=220:t=q:w=1.4:g=-0.8,equalizer=f=350:t=q:w=1.4:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=200:makeup=1.4[FC_pre];
 EOF
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
 [FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
@@ -261,18 +286,20 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # Preset psicoacustici per surround: differenziazione in base alla modalità, con mix di sub-bande filtrate e pesate per creare l'effetto desiderato.
 
-# SONAR: boost verticale con delay differenziati per SL/SR, più presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
+# SONAR: boost verticale con delay differenziati per SL/SR, piu' presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
+# Cue di elevazione (P1, prudente): sul layer alto un lieve lift +0.8 dB a 8 kHz (banda di Blauert "above")
+# invece del vecchio taglio -3.0 dB. Per tornare al comportamento originale: rimettere g=-3.0 sui due [S?h_in].
 read -r -d '' SUR_FILTERS_SONAR <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
 [SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
 [SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
-[SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
+[SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
 [SLlate_in]adelay=38,highpass=f=150,lowpass=f=1500,volume=0.58[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
 [SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
 [SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
-[SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-3.0,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
+[SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
 [SRlate_in]adelay=41,highpass=f=150,lowpass=f=1500,volume=0.58[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SR_out];
 EOF
@@ -331,41 +358,47 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # La funzione set_preset_profile imposta le variabili globali per il processing in base al preset scelto. Ogni preset ha un blocco di filtri surround specifico, 
 # un blocco di filtri voce specifico, un guadagno di decorrelazione per l'aria, e opzioni del limiter finale.
+#
+# DECORR_GAIN segue una curva MONOTONA col grado di collasso del foldown Atmos->5.1:
+# piu' i surround sono schiacciati (Delta molto negativo) piu' "aria" di ri-espansione serve.
+#   SONAR (collasso max) 0.055 > AURA 0.048 > WIDE 0.042 > AEGIS (surround gia' pieni) 0.034 > VOICE 0.
+# NB: il n. di layer e i volumi SL/SR restano specifici di ogni preset: sono il "flavor"
+# spaziale (verticale/posteriore/laterale), non l'intensita' di ri-espansione.
 
 set_preset_profile() {
   case "$SUR_MODE" in
     sonar)
       SUR_BLOCK="$SUR_FILTERS_SONAR"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
-      DECORR_GAIN="0.042"
+      DECORR_GAIN="$DECORR_GAIN_SONAR"
       LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0"
       MODE_TITLE="Sonar (Atmos Like)"
       ;;
     aegis)
       SUR_BLOCK="$SUR_FILTERS_AEGIS"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AEGIS}"
-      DECORR_GAIN="0.052"
+      DECORR_GAIN="$DECORR_GAIN_AEGIS"
       LIMITER_OPTS="limit=0.98:attack=2.5:release=50:level=0"
       MODE_TITLE="AEGIS (Neural:X Like)"
       ;;
     aura)
       SUR_BLOCK="$SUR_FILTERS_AURA"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AURA}"
-      DECORR_GAIN="0.035"
+      DECORR_GAIN="$DECORR_GAIN_AURA"
       LIMITER_OPTS="limit=0.975:attack=3.0:release=60:level=0"
       MODE_TITLE="AURA (Dolby 6.1 Like)"
       ;;
     wide)
       SUR_BLOCK="$SUR_FILTERS_WIDE"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_WIDE}"
-      DECORR_GAIN="0.045"
+      DECORR_GAIN="$DECORR_GAIN_WIDE"
       LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0"
       MODE_TITLE="Wide (7.1 Like)"
       ;;
     voice)
       SUR_BLOCK="$SUR_FILTERS_VOICEONLY"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_VOICEONLY}"
-      DECORR_GAIN="0"
+      DECORR_GAIN="$DECORR_GAIN_VOICE"
       LIMITER_OPTS="limit=0.95:attack=2.0:release=40:level=0"
       MODE_TITLE="VOICE (Dialogue Plus)"
       ;;
@@ -382,8 +415,8 @@ build_input_split_graph() {
 [0:${A_STREAM_INDEX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},
 pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L_CH}|SR=${SUR_R_CH}[base];
 [base]channelsplit=channel_layout=5.1(side)[FL][FR][FC][LFE][SL][SR];
-[FL]highpass=f=112:t=q:w=0.707[FLp];
-[FR]highpass=f=112:t=q:w=0.707[FRp];
+[FL]highpass=f=112:t=q:w=0.707,${FRONT_EQ}[FLp];
+[FR]highpass=f=112:t=q:w=0.707,${FRONT_EQ}[FRp];
 EOF
 }
 
@@ -407,21 +440,24 @@ EOF
 }
 
 # Il blocco di join finale: unisco tutti i canali processati, applico un boost high-shelf leggero per compensare eventuali perdite di brillantezza, poi il volamp finale (se attivo).
-#
+# LFE: catena a 3 stadi → lowpass 120 Hz (pulizia sub-banda, coerente col crossover 110-120 Hz)
+#                       → acompressor (doma i picchi forti senza toccare il basso normale)
+#                       → alimiter (rete di sicurezza finale sui clipping peaks)
 build_output_join_graph() {
   cat <<EOF
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,alimiter=limit=0.94:attack=2.0:release=120:level=0[LFEf];
+[LFE]aformat=channel_layouts=mono,lowpass=f=120,acompressor=threshold=-6dB:ratio=4:attack=5:release=150:makeup=1,alimiter=limit=0.94:attack=2.0:release=120:level=0[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
-highshelf=f=12000:g=0.4:w=0.5:c=FL|FR|FC|SL|SR,${FINAL_GAIN_FILTER}aresample=192000,alimiter=${LIMITER_OPTS},aresample=48000[aout]
+highshelf=f=12000:g=0.4:w=0.5:c=FL|FR|FC|SL|SR,${FINAL_GAIN_FILTER}${ARESAMPLE_192K},alimiter=${LIMITER_OPTS},${ARESAMPLE_48K},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=5.1(side)[aout]
 EOF
 }
 
-# La funzione
+# La funzione build_filter_complex assembla il filtergraph completo concatenando i 4 blocchi:
+# input_split → voice (EQ+compressore FC) → surround (preset psicoacustico) → output_join (LFE chain + mix finale).
 build_filter_complex() {
   local input_graph psycho_graph output_graph
   input_graph="$(build_input_split_graph)"
