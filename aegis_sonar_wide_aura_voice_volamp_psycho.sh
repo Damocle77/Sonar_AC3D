@@ -25,7 +25,7 @@ C_WARN="\033[0;33m[WARNING]\033[0m"
 C_ERR="\033[0;31m[ERROR]\033[0m"
 C_OK="\033[0;32m[OK]\033[0m"
 
-# Funzioni di log: info, warn, err, ok. Usano colori per distinguere i livelli di messaggio. Non terminano lo script, tranne err che è usato per errori critici.
+# Funzioni di log: info, warn, err, ok. Usano colori per distinguere i livelli di messaggio.
 info(){ echo -e "${C_INFO} $*"; }
 warn(){ echo -e "${C_WARN} $*"; }
 err(){  echo -e "${C_ERR}  $*"; }
@@ -258,13 +258,16 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # BLOCCHI VOCE
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-# Processing voce: HPF centrale a 102 Hz + EQ parametrico con boost/cut mirati + compressore dinamico.
+# Processing voce: HPF subsonico a 40 Hz (anti-rumble) + EQ parametrico + compressore dinamico.
+# Il crossover verso il sub lo gestisce l'AVR (Small, 110 Hz): lo script NON taglia in quella regione
+# per evitare il doppio filtro che svuotava i bassi. Calore di petto via bell a 150 Hz (focalizzato),
+# con dip anti-inscatolamento a 450 Hz per togliere il "boxy" senza intaccare il corpo della voce.
 # Obiettivo: dialoghi più leggibili senza effetto megafono, con controllo statico delle sibilanti.
 # Il compressore (threshold=-20dB, ratio=2.5) solleva il parlato debole/sussurrato senza toccare i picchi,
 # ottimizzato per ascolto a basso volume e distanze >3 m. Compatibile con dynaudnorm upstream (makeup contenuto).
 
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
-[FC]highpass=f=102:t=q:w=0.707,equalizer=f=220:t=q:w=1.4:g=-0.8,equalizer=f=350:t=q:w=1.4:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=200:makeup=1.4[FC_pre];
+[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.5,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=200:makeup=1.4[FC_pre];
 EOF
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
 [FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
@@ -291,13 +294,13 @@ EOF
 # invece del vecchio taglio -3.0 dB. Per tornare al comportamento originale: rimettere g=-3.0 sui due [S?h_in].
 read -r -d '' SUR_FILTERS_SONAR <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
-[SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
+[SLd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SLd];
 [SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
 [SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
 [SLlate_in]adelay=38,highpass=f=150,lowpass=f=1500,volume=0.58[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
-[SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
+[SRd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SRd];
 [SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
 [SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
 [SRlate_in]adelay=41,highpass=f=150,lowpass=f=1500,volume=0.58[SRlate];
@@ -307,13 +310,13 @@ EOF
 # AEGIS: cupola sonora con boost più bilanciato e meno artificiale, più presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_AEGIS <<'EOF' || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
-[SLd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SLd];
+[SLd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SLd];
 [SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
 [SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
 [SLlate_in]adelay=39,highpass=f=150,lowpass=f=1300,volume=0.42[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
-[SRd_in]adelay=0,highpass=f=112:t=q:w=0.707,volume=0.95[SRd];
+[SRd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SRd];
 [SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
 [SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
 [SRlate_in]adelay=42,highpass=f=150,lowpass=f=1300,volume=0.42[SRlate];
@@ -323,12 +326,12 @@ EOF
 # WIDE: allargamento laterale più marcato, con boost più evidente sulle sub-bande filtrate, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_WIDE <<'EOF' || true
 [SL]asplit=3[SLd_in][SLe_in][SLx_in];
-[SLd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SLd];
+[SLd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SLd];
 [SLe_in]adelay=9,highpass=f=280,lowpass=f=7000,allpass=f=1200:t=q:w=0.65,volume=0.42[SLe];
 [SLx_in]adelay=22,highpass=f=600,lowpass=f=5000,allpass=f=700:t=q:w=0.70,allpass=f=2600:t=q:w=0.70,volume=0.17[SLx];
 [SLd][SLe][SLx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SL_out];
 [SR]asplit=3[SRd_in][SRe_in][SRx_in];
-[SRd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SRd];
+[SRd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SRd];
 [SRe_in]adelay=10,highpass=f=280,lowpass=f=7000,allpass=f=1350:t=q:w=0.65,volume=0.42[SRe];
 [SRx_in]adelay=24,highpass=f=600,lowpass=f=5000,allpass=f=820:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,volume=0.17[SRx];
 [SRd][SRe][SRx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SR_out];
@@ -337,11 +340,11 @@ EOF
 #AURA: allargamento posteriore più marcato, con boost più evidente sulle sub-bande filtrate, e un layer di decorrelazione a basso livello per aria.
 read -r -d '' SUR_FILTERS_AURA <<'EOF' || true
 [SL]asplit=2[SLd_in][SLa_in];
-[SLd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SLd];
+[SLd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SLd];
 [SLa_in]adelay=8,highpass=f=800,lowpass=f=4500,allpass=f=1400:t=q:w=0.65,volume=0.22[SLa];
 [SLd][SLa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SL_out];
 [SR]asplit=2[SRd_in][SRa_in];
-[SRd_in]adelay=1,highpass=f=112:t=q:w=0.707,volume=1.00[SRd];
+[SRd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SRd];
 [SRa_in]adelay=9,highpass=f=800,lowpass=f=4500,allpass=f=1550:t=q:w=0.65,volume=0.22[SRa];
 [SRd][SRa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SR_out];
 EOF
@@ -349,8 +352,8 @@ EOF
 # VOICE-ONLY: preset rescue per esaltare i dialoghi quando il mix è critico.
 # I surround vengono mantenuti, ma leggermente abbassati per dare priorità al centrale.
 read -r -d '' SUR_FILTERS_VOICEONLY <<'EOF' || true
-[SL]highpass=f=112:t=q:w=0.707,volume=0.88[SL_out];
-[SR]highpass=f=112:t=q:w=0.707,volume=0.88[SR_out];
+[SL]highpass=f=40:t=q:w=0.707,volume=0.88[SL_out];
+[SR]highpass=f=40:t=q:w=0.707,volume=0.88[SR_out];
 EOF
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -415,8 +418,8 @@ build_input_split_graph() {
 [0:${A_STREAM_INDEX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},
 pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L_CH}|SR=${SUR_R_CH}[base];
 [base]channelsplit=channel_layout=5.1(side)[FL][FR][FC][LFE][SL][SR];
-[FL]highpass=f=112:t=q:w=0.707,${FRONT_EQ}[FLp];
-[FR]highpass=f=112:t=q:w=0.707,${FRONT_EQ}[FRp];
+[FL]highpass=f=40:t=q:w=0.707,${FRONT_EQ}[FLp];
+[FR]highpass=f=40:t=q:w=0.707,${FRONT_EQ}[FRp];
 EOF
 }
 
@@ -439,16 +442,20 @@ EOF
   fi
 }
 
-# Il blocco di join finale: unisco tutti i canali processati, applico un boost high-shelf leggero per compensare eventuali perdite di brillantezza, poi il volamp finale (se attivo).
-# LFE: catena a 3 stadi → lowpass 120 Hz (pulizia sub-banda, coerente col crossover 110-120 Hz)
-#                       → acompressor (doma i picchi forti senza toccare il basso normale)
+# Il blocco di join finale: unisco tutti i canali processati, applico un high-shelf molto leggero (aria),
+# tenuto basso perche' YPAO compensa gia' stanza/distanza in posizione d'ascolto, poi il volamp finale (se attivo).
+# LFE: catena a 4 stadi → highpass 30 Hz (protegge SCS 200 dagli infrasuoni che sprecano escursione)
+#                       → lowpass 120 Hz (pulizia sub-banda, coerente col crossover AVR ~110 Hz)
+#                       → acompressor (guardiano dei picchi: ratio 3.0 + attack 8 ms lasciano passare il
+#                         transiente/punch dei colpi proteggendo comunque il sub 100W; makeup 1.1 minimo,
+#                         perche' il LIVELLO lo dà il trim sub dell'AVR, non lo script)
 #                       → alimiter (rete di sicurezza finale sui clipping peaks)
 build_output_join_graph() {
   cat <<EOF
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,lowpass=f=120,acompressor=threshold=-6dB:ratio=4:attack=5:release=150:makeup=1,alimiter=limit=0.94:attack=2.0:release=120:level=0[LFEf];
+[LFE]aformat=channel_layouts=mono,highpass=f=30,lowpass=f=120,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=150:makeup=1.1,alimiter=limit=0.94:attack=2.0:release=120:level=0[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,

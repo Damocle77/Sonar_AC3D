@@ -12,6 +12,14 @@ L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare sol
 
 La suite è tarata per setup domestico a livello medio con diffusori compatti, subwoofer attivo, crossover intorno a **110 Hz**, ascolto a volume medio/basso e priorità all'intelligibilità della voce italiana. *(Testato su: AVR Yamaha RX-4RV, kit 5.1 JBL SCS200, subwoofer attivo Kenwood)*
 
+### Schema di riferimento
+
+La taratura è stata pensata sul seguente layout domestico 5.1: punto d'ascolto centrale, frontali a circa **3,6 m**, centrale sotto TV a circa **140 cm**, surround laterali/posteriori e subwoofer front-left/side-left.
+
+<p align="left">
+  <img src="sonar_room_layout.png" width="700" alt="Schema layout stanza 5.1 Sonary Suite">
+</p>
+
 Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione a:
 
 - dialoghi intelligibili senza effetto megafono;
