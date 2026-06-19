@@ -442,7 +442,7 @@ build_output_join_graph() {
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,highpass=f=30,lowpass=f=120,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=150:makeup=1.1,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
+[LFE]aformat=channel_layouts=mono,highpass=f=30,lowpass=f=120,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=150:makeup=1.0,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
