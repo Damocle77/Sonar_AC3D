@@ -53,12 +53,15 @@ UTILIZZO:
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
   si|no     : Conserva file audio originale.
-  file      : File input singolo. Se omesso, processa tutti file compatibili nella cartella.
+  file      : File input singolo. Se omesso o "" processa tutti file compatibili nella cartella.
   bitrate   : Es. 640k o 768k (default: 640k per AC3, 768k per EAC3).
   preset    : aegis | sonar | wide | aura | voice (default: sonar).
   volamp    : Gain finale opzionale in dB prima del limiter.
-              Valori consentiti: 0, da 0.1 a 2.5.
-              Esempi pratici: 0 | 1.5 | 2 | 2.5
+              Valori consentiti: da 1.1 a 2.5. (default: 1.0)
+              Esempi pratici: 1.5 | 2 | 2.5
+ESEMPIO:
+  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 si "film.mkv" 768k sonar
+  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 no "" 640k wide 1.5
 
 PRESET DISPONIBILI:
   aegis     -> Simula NEURAL:X (DTS:X)  | Cupola Sonora
@@ -95,7 +98,7 @@ shift 2
 INPUT_FILE=""
 BITRATE=""
 SUR_MODE=""
-VOLAMP_DB="0"
+VOLAMP_DB="1"
 POSITIONAL=("$@")
 
 # Ultimo parametro opzionale = volamp (0 .. 2.5 dB)
@@ -271,7 +274,7 @@ fi
 
 # Equalizzazione sartioriale della voce per preset surround, con compressore dinamico per intelligibilità a basso volume. Serve a dare presenza alla voce senza rubare scena ai frontali.
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
-[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.5,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=200:makeup=1.4[FC_pre];
+[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.2,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=200:makeup=1.4[FC_pre];
 EOF
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
 [FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
@@ -442,7 +445,7 @@ build_output_join_graph() {
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,highpass=f=30,lowpass=f=120,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=150:makeup=1.0,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
+[LFE]aformat=channel_layouts=mono,highpass=f=30,lowpass=f=120,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=120:makeup=1.0,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
