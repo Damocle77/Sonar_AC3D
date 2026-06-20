@@ -13,7 +13,7 @@ set -uo pipefail
 # │   - DSP ottimizzato per satelliti compatti, crossover 110-120 Hz (tutti Small)   │
 # │   - Voce: compressore dinamico FC per intelligibilità a basso volume             │
 # │   - Surround psicoacustici controllati                                           │
-# │   - LFE: highpass 30 Hz + lowpass 120 Hz + compressore picchi + limiter          │
+# │   - LFE: highpass 32 Hz + lowpass 110 Hz + compressore picchi + limiter          │
 # │   - Pipeline leggibile: input -> split -> voice -> surround -> output            │
 # ╰──────────────────────────────────────────────────────────────────────────────────╯
 
@@ -46,9 +46,9 @@ done
 
 usage() {
   cat <<'USAGE'
----------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
 UTILIZZO:
-  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
+  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh <ac3|eac3> <si|no> <file|""> [bitrate] [preset] [volamp]
 
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
@@ -57,8 +57,9 @@ PARAMETRI:
   bitrate   : Es. 640k o 768k (default: 640k per AC3, 768k per EAC3).
   preset    : aegis | sonar | wide | aura | voice (default: sonar).
   volamp    : Gain finale opzionale in dB prima del limiter.
-              Valori consentiti: da 1.1 a 2.5. (default: 1.0)
-              Esempi pratici: 1.5 | 2 | 2.5
+              Valori consentiti: 0 .. 2.5.
+              0 = OFF, default = 1.5 dB.
+              Esempi pratici: 0 | 1.0 | 1.5 | 2.0 | 2.5
 ESEMPIO:
   ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 si "film.mkv" 768k sonar
   ./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 no "" 640k wide 1.5
@@ -69,7 +70,7 @@ PRESET DISPONIBILI:
   wide      -> Simula Dolby 7.1         | Allargamento Laterale
   aura      -> Simula Dolby 6.1         | Allargamento Posteriore
   voice     -> Esalta i dialoghi (FC)   | EQ Sartoriale Voce
----------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
 USAGE
   exit 1
 }
@@ -98,7 +99,7 @@ shift 2
 INPUT_FILE=""
 BITRATE=""
 SUR_MODE=""
-VOLAMP_DB="1"
+VOLAMP_DB="1.5"
 POSITIONAL=("$@")
 
 # Ultimo parametro opzionale = volamp (0 .. 2.5 dB)
@@ -439,13 +440,13 @@ EOF
   fi
 }
 
-# Il blocco finale di output: converte tutti i canali in mono, applica il processing LFE (HPF 30 Hz + LPF 120 Hz + compressore + limiter), e fa il join finale in 5.1(side), resampling e limiter.
+# Il blocco finale di output: converte tutti i canali in mono, applica il processing LFE (HPF 32 Hz + LPF 110 Hz + compressore + limiter), e fa il join finale in 5.1(side), resampling e limiter.
 build_output_join_graph() {
   cat <<EOF
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,highpass=f=30,lowpass=f=120,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=120:makeup=1.0,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
+[LFE]aformat=channel_layouts=mono,highpass=f=32,lowpass=f=110,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=120:makeup=1.0,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
@@ -557,7 +558,7 @@ for CUR_FILE in "${FILES[@]}"; do
     -map "0:V:0?" -c:v copy
     -map "0:s?" -c:s copy
     -map "0:t?" -c:t copy
-    -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -ar:a:0 48000 -ac:a:0 6
+    -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -dialnorm -31 -ar:a:0 48000 -ac:a:0 6
     -metadata:s:a:0 title="${OUT_CODEC^^} 5.1 – ${MODE_TITLE}"
     -disposition:a:0 default
   )
@@ -566,7 +567,8 @@ for CUR_FILE in "${FILES[@]}"; do
 
   # Se l'opzione KEEP_ORIG è attiva, mantengo la traccia audio originale come secondaria, copiandola senza ricodifica e disattivando la flag di default.
   if [[ "$KEEP_ORIG" = "si" ]]; then
-    ORIG_TITLE=$(get_audio_title_by_index "$CUR_FILE" "$A_STREAM_INDEX" || echo "Original Audio")
+    ORIG_TITLE="$(get_audio_title_by_index "$CUR_FILE" "$A_STREAM_INDEX" || true)"
+    [[ -z "${ORIG_TITLE// }" ]] && ORIG_TITLE="Original Audio"
     CMD+=( -map 0:"$A_STREAM_INDEX" -c:a:1 copy -metadata:s:a:1 title="$ORIG_TITLE" -disposition:a:1 0 )
   fi
 

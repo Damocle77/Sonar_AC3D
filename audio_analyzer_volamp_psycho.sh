@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# set -e rimosso: causa exit su espressioni aritmetiche (es. var=0; ((var++)))
 set -uo pipefail
 
 # ╭─────────────────────────────────────────────────────────────────────────────────╮
@@ -10,7 +9,7 @@ set -uo pipefail
 # │   Misura il bilanciamento surround/centro e genera run_processing.sh            │
 # │   per il processore aegis_sonar_wide_aura_voice_volamp_psycho.sh.               │
 # │                                                                                 │
-# │   METRICA UNICA: DELTA                                                          │                                                                             │
+# │   METRICA UNICA:                                                                │
 # │   Delta = I(SUR) - I(FC) in dB                                                  │
 # │     - I(FC)  = loudness integrata del canale centrale                           │
 # │     - I(SUR) = media energetica dei surround SL/SR o BL/BR                      │
@@ -33,17 +32,19 @@ set -uo pipefail
 # │   LRA non sceglie piu' il preset: viene misurata solo per limitare il volamp    │
 # │   quando un mix cinematografico e' basso ma molto dinamico.                     │
 # ╰─────────────────────────────────────────────────────────────────────────────────╯
-
+# Note:
 C_INFO="\033[0;36m[INFO]\033[0m"
 C_WARN="\033[0;33m[WARNING]\033[0m"
 C_ERR="\033[0;31m[ERROR]\033[0m"
 C_OK="\033[0;32m[OK]\033[0m"
 
+# Funzioni di log con colori: info, warn, err, ok. Usate per output coerente e facilmente distinguibile.
 info(){ echo -e "${C_INFO} $*"; }
 warn(){ echo -e "${C_WARN} $*"; }
 err(){  echo -e "${C_ERR}  $*"; }
 ok(){   echo -e "${C_OK}  $*"; }
 
+# Controllo binari essenziali: ffmpeg, ffprobe, awk. Se uno manca, esco con errore. Importante per evitare errori a cascata nelle fasi successive quando si tenta di analizzare i file.
 for _bin in ffmpeg ffprobe awk; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
@@ -55,7 +56,7 @@ trap 'rm -rf "$ANALYZER_TMPDIR"' EXIT INT TERM
 
 usage() {
   cat <<'USAGE'
-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
 UTILIZZO:
   ./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate]
   ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]
@@ -72,67 +73,62 @@ PARAMETRI:
             ac3    Alternativa.
   keep    : no     (Default) Non conservare audio originale.
             si     Conserva audio originale nel file processato.
-  bitrate : 448k   (Default) Bitrate per il batch file generato.
+  bitrate : Default automatico: AC3  = 640k - EAC3 = 768k
 
 METRICA:
   DELTA = I(SUR) - I(FC)
   Misura il rapporto fra surround e centrale. Richiede tracce 5.1.
 
-OUTPUT:
-  Se ci sono risultati validi, viene sempre generato run_processing.sh
-  con i comandi consigliati per singolo file, lista manuale o intera cartella.
-
-VOLAMP HEURISTIC:
-  L'analizzatore stima anche un volamp finale (0 / 1.5 / 2 / 2.5 dB)
-  usando la Loudness Integrata del file intero.
-  La LRA viene misurata solo come protezione: se il mix ha dinamica alta,
-  il volamp viene limitato per non schiacciare un mix cinematografico sano.
-
 ESEMPI:
-  ./audio_analyzer_volamp_psycho.sh "film.mkv"            # Singolo file, default eac3/no/448k
+  ./audio_analyzer_volamp_psycho.sh "film.mkv"                    # Singolo file, default eac3/no/768k
   ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k       # Singolo file + run_processing.sh
   ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k               # Cartella corrente + run_processing.sh
   ./audio_analyzer_volamp_psycho.sh . eac3 si 768k                
   ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
 USAGE
   exit 1
 }
 
 # Senza argomenti o con -h/--help -> mostra usage
 [[ $# -eq 0 || "${1:-}" == "-h" || "${1:-}" == "--help" ]] && usage
-
+# Modalità multi-file: se il primo argomento è --files, attivo la modalità multi-file e raccolgo i parametri specifici per questa modalità. In questo modo, posso distinguere chiaramente tra i due modi di passare i file (singolo/cartella vs lista manuale) e gestire i parametri di conseguenza.
 MULTI_FILES_MODE=false
 MULTI_FILES=()
-
+# Modalità --files: i primi 3 argomenti dopo --files sono codec, keep, bitrate. Il resto è lista file.
 if [[ "${1:-}" == "--files" ]]; then
   MULTI_FILES_MODE=true
-
+  # Controllo minimo argomenti per --files: codec, keep, bitrate + almeno 1 file
   if (( $# < 5 )); then
     err "Uso --files non valido. Sintassi: ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]"
     usage
   fi
-
+  # Resto argomenti: codec, keep, bitrate + lista file
   shift
   INPUT_ARG=""
   BATCH_CODEC="${1:-eac3}"
   BATCH_KEEP="${2:-no}"
-  BATCH_BITRATE="${3:-448k}"
+  BATCH_BITRATE="${3:-}"
+  # Lista file a partire dal 4° argomento (indice 3 dopo shift)
   shift 3
   MULTI_FILES=("$@")
 else
   INPUT_ARG="${1:-}"
   BATCH_CODEC="${2:-eac3}"
   BATCH_KEEP="${3:-no}"
-  BATCH_BITRATE="${4:-448k}"
+  BATCH_BITRATE="${4:-}"
 fi
+# Valori di default
+[[ -z "$BATCH_BITRATE" ]] && {
+  [[ "$BATCH_CODEC" = "ac3" ]] && BATCH_BITRATE="640k" || BATCH_BITRATE="768k"
+}
 
 # Validazione
 case "$BATCH_CODEC" in ac3|eac3) ;; *) err "Codec '$BATCH_CODEC' non valido. Usa ac3 o eac3."; usage ;; esac
 case "$BATCH_KEEP" in si|no) ;; *) err "Keep '$BATCH_KEEP' non valido. Usa si o no."; usage ;; esac
-[[ "$BATCH_BITRATE" =~ ^[0-9]+(k|M)?$ ]] || { err "Bitrate '$BATCH_BITRATE' non valido. Es: 448k, 640k, 768k."; usage; }
-[[ "$BATCH_BITRATE" =~ k$|M$ ]] || BATCH_BITRATE="${BATCH_BITRATE}k"
-
+[[ "$BATCH_BITRATE" =~ ^[0-9]+([kKmM])?$ ]] || { err "Bitrate '$BATCH_BITRATE' non valido. Es: 448k, 640k, 768k."; usage; }
+[[ "$BATCH_BITRATE" =~ [kKmM]$ ]] || BATCH_BITRATE="${BATCH_BITRATE}k"
+# Nota: non controllo se i file in --files esistono qui, lo faccio dopo per permettere di passare anche file parzialmente inesistenti senza bloccare tutto.
 if [[ "$MULTI_FILES_MODE" == true ]]; then
   info "Metrica: DELTA | Input: lista manuale (${#MULTI_FILES[@]} file) | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=auto"
 else
@@ -177,10 +173,11 @@ GLOBAL_PRESET_FORCED_VALUES=()
 # ────────────────────────────────────────────────────────────────────────────────
 # Raccolta file
 # ────────────────────────────────────────────────────────────────────────────────
+# Modalità raccolta file:
 FILES=()
 if [[ "$MULTI_FILES_MODE" == true ]]; then
   (( ${#MULTI_FILES[@]} > 0 )) || { err "Modalita' --files richiesta ma nessun file passato."; exit 1; }
-
+  # Controllo esistenza file in modalità --files: se un file non esiste, lo salto con warning ma continuo con gli altri (non blocco tutto).
   for f in "${MULTI_FILES[@]}"; do
     if [[ -f "$f" ]]; then
       FILES+=("$f")
@@ -224,7 +221,7 @@ for f in "${FILES[@]}"; do
   esac
 done
 FILES=("${FILTERED_FILES[@]}")
-
+# Controllo finale: se dopo il filtro non ci sono file validi, esco con errore.
 (( ${#FILES[@]} == 0 )) && { err "Nessun file valido trovato da analizzare."; exit 1; }
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -233,22 +230,22 @@ FILES=("${FILTERED_FILES[@]}")
 probe_audio_streams() {
   local f="$1"
   info "Struttura Audio: $f"
-
+  # ffprobe con output CSV, poi mapfile per array. Gestione robusta di linee vuote e carriage return.
   local raw_data
   raw_data=$(ffprobe -v error -select_streams a \
     -show_entries stream=index,channels,channel_layout:stream_tags=language,title \
     -of csv=p=0 "$f" 2>/dev/null </dev/null || true)
-
+  # Rimozione carriage return per compatibilità Windows/Git Bash: ffprobe a volte emette linee con \r\n, che interferisce con mapfile.
   raw_data="${raw_data//$'\r'/}"
-
+  # Se ffprobe non restituisce dati (es. file senza tracce audio), esco con warning e codice di errore.
   if [[ -z "$raw_data" ]]; then
     warn "Nessuna traccia audio trovata."
     return 1
   fi
-
+  # Parsing robusto dell'output CSV: mapfile per array, gestione di linee vuote, e default per campi mancanti (es. canali, layout, lingua, titolo). Output formattato per display umano.
   local _A_LINES
   mapfile -t _A_LINES <<< "$raw_data"
-
+  # Output formattato: "Stream [index]: Canali: X (layout) | Lingua: lang | Titolo: title"
   for line in "${_A_LINES[@]}"; do
     [[ -z "$line" ]] && continue
     IFS=',' read -r idx ch layout lang title <<<"$line"
@@ -266,6 +263,7 @@ probe_audio_streams() {
 # Score: 6 canali -> +1000, default -> +200, lingua italiana -> +300
 # Restituisce: "stream_index canali layout"
 # ────────────────────────────────────────────────────────────────────────────────
+# Controllo robusto: se ffprobe non restituisce dati, esco con warning e codice di errore. Se nessuno stream è valido, esco con warning e codice di errore. Questo evita errori a cascata nelle fasi successive quando si tenta di analizzare un file senza tracce audio o con tracce non valide.
 pick_best_stream() {
   local f="$1"
   local raw_data
@@ -273,12 +271,13 @@ pick_best_stream() {
     -show_entries stream=index,channels,channel_layout:stream_disposition=default:stream_tags=language \
     -of csv=p=0 "$f" 2>/dev/null </dev/null || true)
   raw_data="${raw_data//$'\r'/}"
-
+  # Punteggio e selezione in linea con la logica del processore: preferenza per 6 canali, traccia default, lingua italiana.
   local best_idx=""
   local best_ch=0
   local best_layout="unknown"
   local best_score=-1
 
+  # Se ffprobe non restituisce dati, esco con warning e codice di errore.
   if [[ -n "$raw_data" ]]; then
     local lines
     mapfile -t lines <<< "$raw_data"
@@ -289,12 +288,12 @@ pick_best_stream() {
       layout="${layout:-unknown}"
       def="${def:-0}"
       lang="${lang:-}"
-
+      # Punteggio: 6 canali -> +1000, default -> +200, lingua italiana -> +300. Allineato alla logica di scelta del processore.
       local score=0
       [[ "$ch" =~ ^[0-9]+$ && "$ch" -eq 6 ]] && score=$((score + 1000))
       [[ "$def" == "1" ]] && score=$((score + 200))
       [[ "${lang,,}" =~ ^it ]] && score=$((score + 300))
-
+      # Se questo stream ha un punteggio migliore del migliore finora, lo seleziono come nuovo best.
       if (( score > best_score )); then
         best_score=$score
         best_idx=$idx
@@ -303,13 +302,14 @@ pick_best_stream() {
       fi
     done
   fi
-
+  # Se non ho trovato stream validi, esco con warning e codice di errore.
   echo "$best_idx $best_ch $best_layout"
 }
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
 # Colore ANSI associato a un preset (per display coerente quando si parte dal nome).
-# ────────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────────
+# Controllo robusto: se il preset non è riconosciuto, restituisco un colore di default (bianco). Evita errori di visualizzazione e permette di gestire casi in cui il preset non è stato classificato correttamente.
 preset_color() {
   case "$1" in
     SONAR) echo "\033[1;36m" ;;
@@ -321,13 +321,14 @@ preset_color() {
   esac
 }
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────────────────
 # Classificazione preset in UN solo awk (meno subprocess: rilevante su Git Bash).
 #   d     = Delta SUR-FC (obbligatorio)
 #   i_fc  = loudness assoluta del centro (opz.): disambigua VOICE vs AEGIS a Delta>-2
 #   width = width Mid/Side dei surround (opz.): se collassati -> WIDE (ricostr. laterale)
 # Output: "PRESET|<colore-ansi>"
-# ────────────────────────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────────────────────────────────────────────
+# Controllo robusto: se d non è un numero valido, restituisco "VOICE" come preset di default con colore giallo. Evita errori di classificazione e permette di gestire casi in cui la metrica Delta non è disponibile (es. file troppo corto o silenzioso).
 classify_preset() {
   local d="$1" i_fc="${2:-}" width="${3:-}"
   awk -v d="$d" -v fc="$i_fc" -v w="$width" \
@@ -371,7 +372,7 @@ measure_stream_i_lra() {
   local f="$1" stream="$2"
   local log_file
   log_file=$(mktemp -p "$ANALYZER_TMPDIR")
-
+  # Esecuzione ffmpeg con ebur128 in un solo passaggio per misurare sia I: che LRA:. Se il file è troppo corto o silenzioso, ebur128 potrebbe non riuscire a misurare la loudness, quindi gestisco l'output in modo che se non riesco a estrarre valori validi, restituisco stringhe vuote per I e LRA.
   ffmpeg -y -nostdin -hide_banner -nostats \
     -i "$f" \
     -map "0:${stream}" \
@@ -393,14 +394,14 @@ measure_stream_i_lra() {
 # ────────────────────────────────────────────────────────────────────────────────
 loudness_to_volamp() {
   local i_val="$1"
-
+  # Controllo robusto: se i_val non è un numero valido, restituisco 0 (nessun boost). Evita errori di calcolo eccessivo o output non numerici.
   [[ -n "$i_val" ]] || { echo "0"; return; }
   [[ "$i_val" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "0"; return; }
 
   local deficit
   deficit=$(awk -v i="$i_val" -v t="$LOUDNESS_TARGET" 'BEGIN { printf "%.2f", (t - i) }')
-
-  if awk -v d="$deficit" 'BEGIN { exit !(d < 0.8) }'; then
+  # Se il deficit è molto basso, non serve boost. Poi step di 1.5/2/2.5 dB per boost crescente, con soglia massima prudente a 2.5 dB.
+  if awk -v d="$deficit" 'BEGIN { exit !(d < -0.5) }'; then
     echo "0"
   elif awk -v d="$deficit" 'BEGIN { exit !(d < 1.8) }'; then
     echo "1.5"
@@ -411,6 +412,7 @@ loudness_to_volamp() {
   fi
 }
 
+# Descrizione testuale del volamp consigliato, per display più umano e meno numerico. Allineata alla logica del processore: 0 = nessun boost, 1.5 = boost leggero, 2 = boost consigliato, 2.5 = boost massimo prudente.
 volamp_to_desc() {
   case "$1" in
     0|0.0)   echo "Nessun incremento necessario" ;;
@@ -421,6 +423,7 @@ volamp_to_desc() {
   esac
 }
 
+# Descrizione testuale del volamp consigliato, per display più umano e meno numerico. Allineata alla logica del processore: 0 = nessun boost, 1.5 = boost leggero, 2 = boost consigliato, 2.5 = boost massimo prudente.
 source_volume_status() {
   local volamp="$1"
   case "$volamp" in
@@ -432,19 +435,19 @@ source_volume_status() {
   esac
 }
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────
 # (LRA ora misurata insieme a I: in measure_stream_i_lra, un solo passaggio ebur128)
-# ────────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────
 
-# ────────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────
 # Limita il volamp se il file ha dinamica alta.
 # Integrato basso + LRA alta spesso significa mix cinematografico, non file rotto.
-# ────────────────────────────────────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────────────────────────
 cap_volamp_by_lra() {
   local volamp="$1" lra="$2"
-
+  # Controllo robusto: se LRA non è un numero valido, restituisco il volamp originale senza limitazione. Evita errori di calcolo eccessivo o output non numerici.
   [[ -n "$lra" && "$lra" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "$volamp"; return; }
-
+  # Se LRA >= 16, il mix è molto dinamico: limito il volamp a 1.5 dB per non schiacciare un mix cinematografico sano. Se LRA è più basso, non limito il volamp, anche se è alto, perché potrebbe essere necessario per mix domestici più compressi.
   if awk -v l="$lra" 'BEGIN { exit !(l >= 16.0) }'; then
     if awk -v v="$volamp" 'BEGIN { exit !(v > 1.5) }'; then
       echo "1.5"
@@ -460,10 +463,11 @@ cap_volamp_by_lra() {
 # Classifica width Mid/Side dei surround.
 # width = I(SIDE) - I(MID). Valori molto negativi = SL/SR simili/collassati.
 # ────────────────────────────────────────────────────────────────────────────────
+# Controllo robusto: se width non è un numero valido, restituisco "N/A". Evita output non numerici e permette di gestire casi in cui la misura width non è disponibile (es. file troppo corto).
 width_to_desc() {
   local w="$1"
   [[ -n "$w" && "$w" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "N/A"; return; }
-
+  # Soglie empiriche per descrivere la separazione L/R dei surround: se width è molto negativo, i surround sono simili o collassati -> "collassato". Se width è moderatamente negativo, i surround sono stretti -> "stretto". Se width è vicino a 0 o positivo, i surround hanno buona separazione -> "medio" o "largo". Queste soglie sono indicative e possono essere regolate in base all'ascolto.
   if awk -v w="$w" 'BEGIN { exit !(w < -12.0) }'; then
     echo "collassato"
   elif awk -v w="$w" 'BEGIN { exit !(w < -7.0) }'; then
@@ -484,13 +488,14 @@ measure_channel_loudness() {
   local log_file
   log_file=$(mktemp -p "$ANALYZER_TMPDIR")
 
+  # Filtro pan= per estrarre il canale specifico (es. c0=FC o c0=SL) e poi ebur128 per misurare la loudness di quel canale. Output silenziato, log ebur128 catturato in un file temporaneo. Se ffmpeg fallisce (es. canale non esistente), continuo comunque per gestire il caso di canali silenziosi o file troppo corti.
   ffmpeg -y -nostdin -hide_banner -nostats \
     -i "$f" \
     -map "0:${stream}" \
     -af "pan=1c|${pan_formula},ebur128=framelog=verbose" \
     -vn -sn -f null - \
     >/dev/null 2>"$log_file" </dev/null || true
-
+  # Estrazione del valore I: dal log di ebur128. Se non riesco a estrarre un valore valido, restituisco stringa vuota. Questo può accadere se il canale è silenzioso o se il file è troppo corto per misurare la loudness.
   local i_val
   i_val=$(grep -E "^\s+I:\s+-?[0-9]" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
   rm -f "$log_file"
@@ -504,55 +509,59 @@ measure_channel_loudness() {
 scan_delta() {
   local f="$1"
   info "Avvio analisi Delta SUR-FC su: $f"
-
+  # Seleziono lo stream migliore usando la stessa logica del processore: preferenza per 6 canali, traccia default, lingua italiana. Restituisce "stream_index canali layout". Se non riesco a trovare stream validi, esco con warning e codice di errore.
   local stream_info
   stream_info=$(pick_best_stream "$f")
   local target_stream="${stream_info%% *}"
   local rest="${stream_info#* }"
   local max_ch="${rest%% *}"
   local layout="${rest#* }"
-
+  # Se pick_best_stream non riesce a trovare stream validi, esce con warning e codice di errore. Controllo robusto: se target_stream non è un numero valido, esco con warning e codice di errore.
   if [[ -z "$target_stream" ]]; then
     warn "Impossibile determinare stream target. File saltato."
     return 1
   fi
-
+  # Controllo robusto: se max_ch non è un numero valido, esco con warning e codice di errore.
   if [[ "$max_ch" =~ ^[0-9]+$ && "$max_ch" -ne 6 ]]; then
     warn "Stream [$target_stream] ha $max_ch canali (non 5.1). Delta richiede 5.1. Saltato."
     return 1
   fi
-
+  # Controllo layout: se è un layout 5.1 riconosciuto, uso le designazioni corrette per i canali surround (BL/BR o SL/SR). Se il layout è sconosciuto, uso SL/SR come default e emetto un warning.
   local sur_l="SL" sur_r="SR"
   case "$layout" in
     "5.1"|"5.1(back)") sur_l="BL"; sur_r="BR" ;;
     "5.1(side)")        sur_l="SL"; sur_r="SR" ;;
     *)                  sur_l="SL"; sur_r="SR"
-                        warn "Layout '${layout}' non standard, assumo SL/SR." ;;
+                        info "Layout audio '${layout}' non dichiarato in modo standard: uso SL/SR come standard surround." ;;
   esac
-
+  # Controllo robusto: se layout è dichiarato ma non è un layout 5.1 riconosciuto, emetto un warning ma continuo comunque con SL/SR come default per i canali surround.
   info "Misura loudness FC... (stream [$target_stream])"
   local i_fc
   i_fc=$(measure_channel_loudness "$f" "$target_stream" "c0=FC")
 
+  # Controllo robusto: se i_fc è vuoto o non è un numero valido, esco con warning e codice di errore. Questo può accadere se il canale centrale è silenzioso o se il file è troppo corto per misurare la loudness.
   info "Misura loudness SL..."
   local i_sl
   i_sl=$(measure_channel_loudness "$f" "$target_stream" "c0=${sur_l}")
 
+  # Controllo robusto: se i_sl è vuoto o non è un numero valido, esco con warning e codice di errore. Questo può accadere se il canale surround sinistro è silenzioso o se il file è troppo corto per misurare la loudness.
   info "Misura loudness SR..."
   local i_sr
   i_sr=$(measure_channel_loudness "$f" "$target_stream" "c0=${sur_r}")
 
+  # Controllo robusto: se i_sr è vuoto o non è un numero valido, esco con warning e codice di errore. Questo può accadere se il canale surround destro è silenzioso o se il file è troppo corto per misurare la loudness.
   if [[ -z "$i_fc" || -z "$i_sl" || -z "$i_sr" ]]; then
     warn "Loudness non misurabile per $f. Canale silenzioso o file troppo corto?"
     return 1
   fi
-
+  # Calcolo SUR come media energetica di SL e SR, poi Delta come differenza tra SUR e FC. Uso un file temporaneo per gestire i calcoli in awk, evitando problemi di precisione o formattazione nei passaggi di variabili.
   local i_sur delta
   _delta_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
   awk -v sl="$i_sl" -v sr="$i_sr" -v fc="$i_fc" 'BEGIN { sur=-10*log(((10^(sl/-10))+(10^(sr/-10)))/2)/log(10); d=sur-fc; printf "%.1f %.1f\n",sur,d }' < /dev/null > "$_delta_tmp"
   read -r i_sur delta < "$_delta_tmp"
   rm -f "$_delta_tmp"
 
+  # Controllo robusto: se i_sur o delta non sono numeri validi, esco con warning e codice di errore.
   local forced_preset=0 forced_reason=""
   if awk -v sur="$i_sur" -v gate="$FAKE_SUR_GATE" 'BEGIN { exit !(sur < gate) }'; then
     warn "Surround virtualmente muti (${i_sur} LUFS): falso 5.1 / front-heavy. Forzo VOICE."
@@ -560,11 +569,13 @@ scan_delta() {
     forced_reason="fake_surround"
   fi
 
+  # Se Delta > -2 dB, i surround sono forti rispetto al centro. Se in questo caso la loudness assoluta del centro è molto bassa (sotto VOICE_FC_GATE), è probabile che il dialogo sia davvero coperto e non un mix immersivo con surround forti. In questo caso, forzo il preset VOICE per dare priorità alla voce, altrimenti lascio AEGIS che è più bilanciato.
   info "Misura width Mid/Side SL-SR..."
   local i_mid i_side width_ms width_desc
   i_mid=$(measure_channel_loudness "$f" "$target_stream" "c0=0.5*${sur_l}+0.5*${sur_r}")
   i_side=$(measure_channel_loudness "$f" "$target_stream" "c0=0.5*${sur_l}-0.5*${sur_r}")
 
+  # Controllo robusto: se i_mid o i_side non sono numeri validi, non calcolo width e lo segnalo come N/A. Questo può accadere se i canali surround sono silenziosi o se il file è troppo corto per misurare la loudness.
   width_ms=""
   width_desc="N/A"
   if [[ -n "$i_mid" && -n "$i_side" ]]; then
@@ -572,6 +583,7 @@ scan_delta() {
     width_desc=$(width_to_desc "$width_ms")
   fi
 
+  # Misura loudness integrata (I:) e LRA dell'intero stream in un solo passaggio, per valutare il volamp consigliato. Se la misura non è possibile (es. file troppo corto), i_full e lra_full saranno vuoti, e il volamp sarà 0 (nessun boost).
   local i_full lra_full volamp_raw volamp volamp_desc volume_status volamp_note
   local _i_lra
   _i_lra=$(measure_stream_i_lra "$f" "$target_stream")
@@ -584,6 +596,7 @@ scan_delta() {
   volamp_note=""
   [[ "$volamp" != "$volamp_raw" ]] && volamp_note=" cap LRA"
 
+  # Classificazione preset finale, con logica completa che considera Delta, loudness assoluta del centro (i_fc) e width dei surround. Se è stato forzato un preset a causa di surround molto deboli, uso direttamente VOICE con il colore associato, altrimenti uso classify_preset per determinare il preset in base alle metriche.
   local preset_raw
   if [[ "$forced_preset" -eq 1 ]]; then
     preset_raw="VOICE|\033[1;33m"
@@ -593,6 +606,7 @@ scan_delta() {
   local preset="${preset_raw%%|*}"
   local p_color="${preset_raw##*|}"
 
+  # Descrizione testuale del preset, per display più umano. Se il preset è stato forzato, aggiungo una nota che indica la ragione del forzamento.
   local preset_desc
   case "$preset" in
     SONAR) preset_desc="Surround molto deboli, ricostruzione psicoacustica" ;;
@@ -603,6 +617,7 @@ scan_delta() {
   esac
   [[ "$forced_preset" -eq 1 ]] && preset_desc="${preset_desc}; forzato da ${forced_reason}"
 
+  # Accumulo risultati per verdetto stagionale e tabella finale. Se il preset è stato forzato, uso comunque il Delta reale per il verdetto stagionale, perché riflette la realtà del mix, ma segnalo il preset forzato nella tabella per chiarezza.
   GLOBAL_METRIC_VALUES+=("$delta")
   GLOBAL_METRIC_FILES+=("$(basename "$f")")
   GLOBAL_METRIC_PATHS+=("$f")
@@ -613,6 +628,7 @@ scan_delta() {
   GLOBAL_PRESET_VALUES+=("$preset")
   GLOBAL_PRESET_FORCED_VALUES+=("$forced_preset")
 
+  # Display dei risultati per il file, con colori e descrizioni. Se alcune metriche non sono misurabili, le segnalo come N/A. Se il preset è stato forzato, mostro comunque il preset forzato ma con la descrizione che indica la ragione.
   ok "Risultati Delta per: $f"
   echo -e "  \033[1;33mI(FC):    \033[0m  ${i_fc} LUFS"
   echo -e "  \033[1;33mI(SL):    \033[0m  ${i_sl} LUFS"
@@ -631,6 +647,7 @@ scan_delta() {
 # ────────────────────────────────────────────────────────────────────────────────
 # CICLO PRINCIPALE
 # ────────────────────────────────────────────────────────────────────────────────
+# Per ogni file, analizzo la struttura audio e poi eseguo l'analisi Delta. Se la struttura audio non è valida (es. nessuna traccia, traccia non 5.1), salto il file con un warning. I risultati di ogni file vengono accumulati in array globali per il verdetto stagionale e la tabella finale.
 for CUR_FILE in "${FILES[@]}"; do
   info "Analisi: $CUR_FILE"
   probe_audio_streams "$CUR_FILE" || continue
@@ -646,16 +663,18 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   CNT=${#GLOBAL_METRIC_VALUES[@]}
   HIGH_SPREAD=0
 
+  # Se ho più di un episodio, calcolo statistiche (min, max, media, P25) per il verdetto stagionale. Uso file temporanei e awk per gestire i calcoli in modo robusto e preciso, evitando problemi di formattazione o precisione nei passaggi di variabili. Se ho un solo episodio, uso direttamente quel valore per tutte le statistiche.
   if [[ "$CNT" -gt 1 ]]; then
     _vals_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
     printf '%s\n' "${GLOBAL_METRIC_VALUES[@]}" > "$_vals_tmp"
-
+    # Calcolo statistiche con awk: ordino i valori, prendo min (primo), max (ultimo), media (somma/n) e P25 (valore al rank 0.25*n). Se il calcolo fallisce per qualche motivo, esco con warning e codice di errore.
     _stats_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
     awk '{v[NR]=$1+0} END{n=NR; for(i=2;i<=n;i++){k=v[i];j=i-1; while(j>=1&&v[j]>k){v[j+1]=v[j];j--}; v[j+1]=k}; mn=v[1];mx=v[n]; s=0;for(i=1;i<=n;i++)s+=v[i]; avg=s/n; raw=0.25*n;rank=int(raw);if(raw>rank)rank=rank+1; if(rank<1)rank=1;if(rank>n)rank=n; pctl=v[rank]; printf "%.1f %.1f %.1f %.1f\n",mn,mx,avg,pctl}' "$_vals_tmp" > "$_stats_tmp"
-
+    
+    # Leggo le statistiche calcolate da awk, che sono formattate con una cifra decimale. Se per qualche motivo la lettura fallisce, esco con warning e codice di errore.
     read -r m_min m_max m_avg m_pctl < "$_stats_tmp"
     rm -f "$_vals_tmp" "$_stats_tmp"
-
+    # Calcolo lo spread come differenza tra max e min, formattato con una cifra decimale. Se lo spread è maggiore di 4 dB, considero la stagione eterogenea e suggerisco di considerare i preset per-file invece del verdetto stagionale.
     m_spread=$(awk -v mx="$m_max" -v mn="$m_min" 'BEGIN { s=mx-mn; if(s<0)s=-s; printf "%.1f",s }')
     HIGH_SPREAD=$(awk -v s="$m_spread" 'BEGIN { print (s > 4.0) ? 1 : 0 }')
   else
@@ -665,11 +684,12 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     m_pctl="${GLOBAL_METRIC_VALUES[0]}"
     m_spread="0.0"
   fi
-
+  # Determino il preset stagionale consigliato in base al valore P25 (audiofilo) di Delta, usando la mappa Delta -> Preset. Se per qualche motivo la classificazione fallisce, esco con warning e codice di errore.
   season_raw=$(delta_to_preset "$m_pctl")
   season_preset="${season_raw%%|*}"
   season_color="${season_raw##*|}"
 
+  # Descrizione testuale del preset stagionale, per display più umano. Allineata alla logica dei preset: SONAR per surround molto deboli, AURA per surround deboli, WIDE per surround medi, AEGIS per surround buoni, VOICE per surround forti o centro coperto.
   case "$season_preset" in
     SONAR) season_desc="Surround molto deboli, serve ricostruzione psicoacustica" ;;
     AURA)  season_desc="Surround deboli, allargamento prudente" ;;
@@ -677,7 +697,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     AEGIS) season_desc="Surround buoni, controllo e bilanciamento" ;;
     VOICE) season_desc="Surround forti o centro coperto, priorita' voce" ;;
   esac
-
+  # Display del verdetto stagionale, con statistiche e preset consigliato. Se lo spread è alto, avverto che la stagione è eterogenea e suggerisco di considerare i preset per-file, che mostro in una tabella con i nomi dei file (troncati se troppo lunghi), i valori di Delta e i preset consigliati per ciascun file, con colori.
   if [[ "$CNT" -gt 1 ]]; then
     echo -e "  Episodi analizzati:  \033[1;37m${CNT}\033[0m"
     echo -e "  Media:               \033[0;37m${m_avg} dB\033[0m"
@@ -685,14 +705,15 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     echo -e "  Range:               \033[0;37m${m_min} / ${m_max} dB  (spread: ${m_spread} dB)\033[0m"
     echo -e "  Preset Consigliato:  ${season_color}${season_preset}\033[0m  (${season_desc})"
 
+    # Se alcuni file hanno preset forzati a VOICE a causa di surround virtualmente muti, conto quanti sono e mostro una nota che indica quanti file hanno questo problema, per dare un'indicazione aggiuntiva sulla natura della stagione.
     forced_count=0
     for fp in "${GLOBAL_PRESET_FORCED_VALUES[@]}"; do
       [[ "$fp" == "1" ]] && forced_count=$((forced_count + 1))
     done
     if [[ "$forced_count" -gt 0 ]]; then
       echo -e "  \033[0;33mNota: ${forced_count} file con surround virtualmente muti: preset forzato per-file a VOICE.\033[0m"
-    fi
-
+    fi 
+    # Se ho valori di volamp consigliati per-file, calcolo anche il volamp stagionale come P75 prudente della loudness integrata, per dare un'indicazione aggiuntiva sul livello di boost consigliato a livello stagionale. Uso un file temporaneo e awk per calcolare il P75, che è un valore prudente per il boost consigliato, evitando di essere influenzato da outlier con volamp molto alti.
     if [[ ${#GLOBAL_VOLAMP_VALUES[@]} -gt 0 ]]; then
       _volamp_tmp=$(mktemp -p "$ANALYZER_TMPDIR")
       printf '%s\n' "${GLOBAL_VOLAMP_VALUES[@]}" > "$_volamp_tmp"
@@ -700,7 +721,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       rm -f "$_volamp_tmp"
       echo -e "  Volamp Stagionale:  \033[1;36m${season_volamp} dB\033[0m  (P75 prudente della loudness)"
     fi
-
+    # Se lo spread è alto, avverto che la stagione è eterogenea e suggerisco di considerare i preset per-file, mostrando una tabella con i nomi dei file (troncati se troppo lunghi), i valori di Delta e i preset consigliati per ciascun file, con colori.
     if [[ "$HIGH_SPREAD" -eq 1 ]]; then
       echo ""
       echo -e "  \033[0;33m⚠  Spread > 4 dB: la stagione e' eterogenea.\033[0m"
@@ -717,8 +738,8 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   fi
 
   # ── Generazione batch file ─────────────────────────────────────────────────
+  # Se ho risultati validi, genero un batch file con i comandi di processing consigliati per ogni file, usando i preset raffinati per-file se sono stati forzati o se la stagione è eterogenea, altrimenti usando il preset stagionale. Il batch file include commenti e istruzioni per l'utente, e ogni comando include un commento con le metriche rilevanti per quel file.
   BATCH_FILE="run_processing.sh"
-
   {
     echo '#!/usr/bin/env bash'
     echo "# ── Batch generato da audio_analyzer_delta (V4.6 DELTA/VOLAMP/FILES/AUTORUN) ──"
@@ -738,6 +759,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     echo '# ── COMANDI ──'
     echo "# Nota: l'ultimo parametro numerico e' il volamp consigliato per-file."
 
+    # Per ogni file, genero un comando di processing usando il preset raffinato per-file se è stato forzato o se la stagione è eterogenea, altrimenti usando il preset stagionale. Escludo i file che hanno già preset AC3 dedicati, perché non hanno senso da processare con questo script di upmix/boost.
     for (( i=0; i<CNT; i++ )); do
       case "${GLOBAL_METRIC_PATHS[$i]}" in
         *_AC3_Aegis.mkv|*_AC3_Sonar.mkv|*_AC3_Wide.mkv|*_AC3_Aura.mkv|*_AC3_Voice.mkv|\
@@ -745,7 +767,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
           continue
           ;;
       esac
-
+      # Determino il preset da usare per il comando di processing: se è stato forzato o se la stagione è eterogenea, uso il preset raffinato per-file già calcolato in scan_delta (che include la disambiguazione width / I(FC)), altrimenti uso il preset stagionale.
       file_preset=""
       if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" || "$HIGH_SPREAD" -eq 1 ]]; then
         # Forzato (fake 5.1) o stagione eterogenea: uso il preset raffinato per-file
@@ -754,7 +776,8 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       else
         file_preset="$season_preset"
       fi
-
+      # Se per qualche motivo il preset per-file è vuoto, uso il preset stagionale come fallback, per garantire che ogni file abbia un preset assegnato nel batch.
+      [[ -z "$file_preset" ]] && file_preset="${season_preset:-SONAR}"
       file_preset_lower="${file_preset,,}"
       file_volamp="${GLOBAL_VOLAMP_VALUES[$i]:-0}"
       file_loudness="${GLOBAL_LOUDNESS_VALUES[$i]:-N/A}"
@@ -762,6 +785,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
       file_lra="${GLOBAL_LRA_VALUES[$i]:-N/A}"
       escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
 
+      # Genero il comando di processing per il file, usando il preset determinato e includendo un commento con le metriche rilevanti (Delta, I(FC), LRA, Width MS, volamp consigliato). Il comando è formattato in modo che i parametri siano chiari e facilmente modificabili se necessario.
       printf '"$PROC" "$CODEC" "$KEEP" %s "$BITRATE" %s %s  # DELTA %s dB | I=%s LUFS | LRA=%s LU | WidthMS=%s dB | volamp=%s dB\n' \
         "$escaped_path" "$file_preset_lower" "$file_volamp" "${GLOBAL_METRIC_VALUES[$i]}" "$file_loudness" "$file_lra" "$file_width" "$file_volamp"
     done
@@ -769,7 +793,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     echo ''
     echo 'echo "Batch completato."'
   } > "$BATCH_FILE"
-
+  # Rendo eseguibile il batch file generato e mostro un messaggio di conferma. Se per qualche motivo il batch file non è stato generato correttamente, esco con warning e codice di errore.
   chmod +x "$BATCH_FILE"
   ok "Batch file generato: ${BATCH_FILE}"
 else

@@ -33,8 +33,6 @@ Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione 
 
 ---
 
----
-
 ## Requisiti
 
 ### Software
@@ -81,7 +79,7 @@ awk --version 2>/dev/null || awk -W version
 | `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset psicoacustici, diffusori compatti crossover 110 Hz, voce italiana body-safe, master limiter a 192 kHz |
 | `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 con due preset: `to51` e `quad` |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie, ASMR, VR e sorgenti intime |
-| `atmos_to_51_dynaudnorm_volamp_psicho.sh` | Conversione EAC3 Atmos/JOC → EAC3 5.1 DynNorm con high-pass subsonico + traccia Atmos originale preservata |
+| `atmos_to_51_dynaudnorm_psicho.sh` | Conversione EAC3 Atmos/JOC → EAC3 5.1 DynNorm con high-pass subsonico + traccia Atmos originale preservata |
 
 > Nota naming: il file Atmos attuale si chiama `psicho` e non `psycho`. Il README usa il nome reale del file, perché Bash non perdona i refusi e non ha mai avuto senso dell'umorismo.
 
@@ -92,7 +90,7 @@ awk --version 2>/dev/null || awk -W version
 Hai una cartella piena di episodi 5.1 (es. `ac3` o `eac3`) e non vuoi leggere il manuale? 
 
 ```bash
-# 1. Analizza la cartella (sceglierà il preset migliore per ogni file)
+# 1. Analizza la cartella e genera il batch consigliato
 ./audio_analyzer_volamp_psycho.sh . eac3 no 768k
 
 # 2. Lancia il processing generato
@@ -147,12 +145,12 @@ Niente variabili da esportare prima del lancio: il target domestico `-21.0` è d
 | `file|directory|""` | file, directory o stringa vuota | obbligatorio | `""` analizza la cartella corrente |
 | `codec` | `eac3`, `ac3` | `eac3` | codec usato nel batch generato |
 | `keep` | `si`, `no` | `no` | mantiene o meno la traccia originale nel processing finale |
-| `bitrate` | es. `448k`, `640k`, `768k` | `448k` | accetta anche numeri senza `k` |
+| `bitrate` | es. `448k`, `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza `k` |
 
 ### Esempi
 
 ```bash
-./audio_analyzer_volamp_psycho.sh "film.mkv"
+./audio_analyzer_volamp_psycho.sh "film.mkv"                    # singolo file, default eac3/no/768k
 ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k
 ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k
 ./audio_analyzer_volamp_psycho.sh . eac3 si 768k
@@ -170,7 +168,7 @@ Niente variabili da esportare prima del lancio: il target domestico `-21.0` è d
 | `-7 / -3 dB` | medio |
 | `> -3 dB` | largo |
 
-Per ora è diagnostico: non modifica automaticamente il processore. HAL non deve guidare la nave senza supervisione.
+È usato come raffinamento euristico: se i surround risultano stretti/collassati può spostare la scelta verso `wide` nei casi in cui ha più senso ricostruire lateralità. HAL non guida la nave da solo, ma ogni tanto suggerisce la rotta.
 
 ### `run_processing.sh`
 
@@ -186,8 +184,8 @@ Il valore finale numerico è il `volamp` consigliato per-file.
 
 | Delta | Preset | Interpretazione |
 |---:|---|---|
-| `< -15 dB` | `sonar` | surround molto deboli, ricostruzione psicoacustica |
-| `-15 / -10 dB` | `aura` | surround deboli, allargamento prudente |
+| `< -13 dB` | `sonar` | surround molto deboli, ricostruzione psicoacustica |
+| `-13 / -10 dB` | `aura` | surround deboli, allargamento prudente |
 | `-10 / -6 dB` | `wide` | surround medi, scena laterale |
 | `-6 / -2 dB` | `aegis` | surround buoni, controllo e bilanciamento |
 | `> -2 dB` | `voice` | surround forti o centrale coperto, priorità voce |
@@ -226,10 +224,12 @@ Se non trovi `soxr` nell'output:
 
 ### Taratura generale per satelliti compatti
 
-- centrale `FC`: high-pass **102 Hz** Butterworth morbido;
-- frontali `FL/FR`: high-pass **112 Hz**;
-- surround diretti `SL/SR`: high-pass **112 Hz**;
-- EQ voce italiana body-safe: `220 Hz -0.8 dB`, `350 Hz -0.6 dB`, `1100 Hz +0.8 dB`, controllo sibilanti intorno a `7200 Hz`;
+- centrale `FC`: high-pass morbido a **40 Hz** + EQ voce dedicato;
+- frontali `FL/FR`: high-pass morbido a **40 Hz** + `FRONT_EQ`;
+- surround diretti `SL/SR`: high-pass morbido a **40 Hz** nei preset;
+- `LFE`: high-pass **32 Hz** + low-pass **110 Hz** + compressore picchi + limiter;
+- il crossover reale dei satelliti resta demandato all'AVR, consigliato intorno a **110 Hz**;
+- EQ voce italiana body-safe: lieve controllo del corpo, presenza mirata intorno a `1100/1650/2450/3800 Hz` e contenimento della brillantezza alta;
 - air layer psicoacustico a **12/15 ms**, filtrato 1600-9500 Hz;
 - `DECORR_GAIN` ridotti per non mascherare il centrale;
 - high shelf finale leggero a 12 kHz su canali non-LFE;
@@ -262,7 +262,7 @@ Se non trovi `soxr` nell'output:
 | `file` | file singolo | cartella corrente | se omesso processa i file compatibili nella directory |
 | `bitrate` | es. `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza suffisso |
 | `preset` | `aegis`, `sonar`, `wide`, `aura`, `voice` | `sonar` | modalità surround |
-| `volamp` | `0` - `2.5` | `0` | gain finale in dB prima del limiter |
+| `volamp` | `0` - `2.5` | `1.5` | gain finale in dB prima del limiter; `0` = OFF |
 
 ### Esempi
 
@@ -434,13 +434,13 @@ Integra:
 
 ---
 
-## 5) `atmos_to_51_dynaudnorm_volamp_psicho.sh`
+## 5) `atmos_to_51_dynaudnorm_psicho.sh`
 
 Prepara materiale **EAC3 Atmos/JOC** per il workflow 5.1.
 
 Produce un MKV dual-track:
 
-1. **EAC3 5.1 Dynamic Normalized**, ottenuta decodificando il bed 5.1 e applicando un `highpass` subsonico a 20 Hz + `dynaudnorm` prudente;
+1. **EAC3 5.1 Normalized**, ottenuta decodificando il bed 5.1 e applicando un `highpass` subsonico a 20 Hz + `dynaudnorm` prudente;
 2. **EAC3 Atmos originale**, copiata bit-perfect.
 
 FFmpeg non renderizza gli oggetti Atmos come un AVR: lavora sul bed multicanale decodificabile. Questo script lo normalizza a `5.1(side)`, applica `dynaudnorm` con `coupling=1` e preserva la traccia Atmos originale. Prudenza e utilità nella stessa stanza: succede raramente, godiamocela.
@@ -448,7 +448,7 @@ FFmpeg non renderizza gli oggetti Atmos come un AVR: lavora sul bed multicanale 
 ### Sintassi
 
 ```bash
-./atmos_to_51_dynaudnorm_volamp_psicho.sh <file|directory|""> [bitrate]
+./atmos_to_51_dynaudnorm_psicho.sh <file|directory|""> [bitrate]
 ```
 
 ### Parametri
@@ -476,23 +476,23 @@ Questa configurazione è conservativa:
 ### Esempi
 
 ```bash
-./atmos_to_51_dynaudnorm_volamp_psicho.sh "film.mkv"
-./atmos_to_51_dynaudnorm_volamp_psicho.sh "film.mkv" 768k
-./atmos_to_51_dynaudnorm_volamp_psicho.sh /path/to/folder
-./atmos_to_51_dynaudnorm_volamp_psicho.sh . 768k
-./atmos_to_51_dynaudnorm_volamp_psicho.sh "" 768k
+./atmos_to_51_dynaudnorm_psicho.sh "film.mkv"
+./atmos_to_51_dynaudnorm_psicho.sh "film.mkv" 768k
+./atmos_to_51_dynaudnorm_psicho.sh /path/to/folder
+./atmos_to_51_dynaudnorm_psicho.sh . 768k
+./atmos_to_51_dynaudnorm_psicho.sh "" 768k
 ```
 
 ### Output
 
 ```text
-<nome>_EAC3_51_DynNorm.mkv
+<nome>-0.mkv
 ```
 
 Con tracce:
 
 ```text
-Traccia 1: EAC3 5.1 – Dynamic Normalized
+Traccia 1: EAC3 5.1 – Normalized
 Traccia 2: EAC3 Atmos (Original)
 ```
 
@@ -507,7 +507,7 @@ Non è un benchmark scientifico. È una mappa pratica del costo relativo, così 
 | `audio_analyzer_volamp_psycho.sh` | Medio | misura più canali con EBU R128, quindi non è gratis |
 | `stereo251_upmix_psycho.sh` | Medio | upmix + filtri + encoding audio |
 | `asmr_vr_intimate_psycho.sh` | Medio | loudnorm, BS2B, EQ e limiter stereo |
-| `atmos_to_51_dynaudnorm_volamp_psicho.sh` | Medio/Alto | decode EAC3/Atmos bed + dynaudnorm + re-encode EAC3 |
+| `atmos_to_51_dynaudnorm_psicho.sh` | Medio/Alto | decode EAC3/Atmos bed + dynaudnorm + re-encode EAC3 |
 | `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Alto | filtergraph 5.1 completo, cuore pesante della suite |
 
 Ordine indicativo dal più leggero al più pesante:
@@ -516,7 +516,7 @@ Ordine indicativo dal più leggero al più pesante:
 audio_analyzer_volamp_psycho
 stereo251_upmix_psycho
 asmr_vr_intimate_psycho
-atmos_to_51_dynaudnorm_volamp_psicho
+atmos_to_51_dynaudnorm_psicho
 aegis_sonar_wide_aura_voice_volamp_psycho
 ```
 
@@ -576,7 +576,7 @@ oppure, per quadrifonia ponderata:
 Prima prepara il dual-track:
 
 ```bash
-./atmos_to_51_dynaudnorm_volamp_psicho.sh "film_atmos.mkv" 768k
+./atmos_to_51_dynaudnorm_psicho.sh "film_atmos.mkv" 768k
 ```
 
 Poi lavora sul core 5.1 generato.
