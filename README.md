@@ -2,7 +2,7 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Psychoacoustic Suite - Giugno 2026
+# 🎧 Psychoacoustic Suite - FFmpeg Toolkit - Giugno 2026
 
 Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracce audio stereo, 5.1 e Atmos/EAC3 in modo offline, ripetibile e controllato.
 
@@ -26,7 +26,7 @@ Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione 
 - surround presenti ma non invadenti;
 - protezione dei piccoli satelliti tramite passa-alto morbidi;
 - basso gestito principalmente dall'AVR/sub, senza gonfiare LFE inutilmente;
-- loudness domestico prudente tramite `volamp`;
+- make-up gain finale coerente tramite `volamp`, allineato fra analyzer e processore; baseline automatica v2.5 a `2.5 dB`;
 - batch ripetibili su film, episodi e cartelle intere.
 
 > Non tutti i supereroi indossano un mantello. Alcuni utilizzano `filter_complex`.
@@ -75,7 +75,7 @@ awk --version 2>/dev/null || awk -W version
 
 | Script | Scopo |
 |---|---|
-| `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, target domestico `-21 LUFS`, fake-5.1 gate e generazione automatica di `run_processing.sh` |
+| `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, target domestico `-21 LUFS`, fake-5.1 gate, volamp automatico **2.5-4.0 dB** e generazione automatica di `run_processing.sh` |
 | `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset psicoacustici, diffusori compatti crossover 110 Hz, voce italiana body-safe, master limiter a 192 kHz |
 | `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 con due preset: `to51` e `quad` |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie, ASMR, VR e sorgenti intime |
@@ -122,7 +122,8 @@ Dove:
 - target loudness interno fisso: **`-21.0 LUFS`**, pensato per ascolto domestico;
 - fake-5.1 gate: se `I(SUR) < -60 LUFS`, forza preset `voice` per evitare SONAR su rumore/dither;
 - usa `Delta` per scegliere il preset;
-- usa la loudness integrata per stimare `volamp`;
+- usa la loudness integrata per stimare `volamp` come **make-up gain finale del DSP**;
+- usa una base automatica v2.5 di **2.5 dB**, con salita progressiva fino a **4.0 dB** quando il file è realmente basso;
 - usa la LRA solo come protezione per limitare `volamp` quando il mix è basso ma molto dinamico;
 - usa P25 come verdetto stagionale, con bias verso episodi con surround più deboli;
 - se lo spread supera 4 dB, genera preset per-file;
@@ -175,10 +176,10 @@ Niente variabili da esportare prima del lancio: il target domestico `-21.0` è d
 Il batch generato contiene comandi di questo tipo:
 
 ```bash
-"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 1.5
+"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 2.5
 ```
 
-Il valore finale numerico è il `volamp` consigliato per-file.
+Il valore finale numerico è il `volamp` consigliato per-file. Se `run_processing.sh` passa quel numero, il valore scritto nel batch prevale sul default interno del processore.
 
 ### Mappa Delta → preset
 
@@ -192,14 +193,30 @@ Il valore finale numerico è il `volamp` consigliato per-file.
 
 ### Volamp
 
-`volamp` è un gain finale prudente applicato dal processore **prima del limiter**.
-L'analyzer lo stima usando la loudness integrata del file intero rispetto a un target domestico di **-21.0 LUFS**, ma limita il valore quando la LRA è alta, per rispettare la dinamica cinematografica originale.
+`volamp` è il **make-up gain finale della pipeline DSP**, applicato dal processore **prima del master limiter**.
+Non è più pensato come piccolo boost opzionale: serve ad allineare il livello percepito del file processato a quello della sorgente, dopo EQ, compressione mirata del centrale, processing surround e controllo LFE.
 
-Step usati:
-- `0 dB`   -> nessun incremento necessario
-- `1.5 dB` -> lieve recupero loudness
-- `2 dB`   -> boost consigliato
-- `2.5 dB` -> boost massimo prudente
+L'analyzer lo stima usando la loudness integrata del file intero rispetto a un target domestico di **-21.0 LUFS**. La logica automatica v2.5 parte da **2.5 dB** e può salire fino a **4.0 dB** se il file è realmente basso.
+
+Step automatici usati:
+
+| Volamp | Diagnosi pratica |
+|---:|---|
+| `2.5 dB` | make-up DSP standard plus / volume sorgente OK o quasi OK |
+| `3.0 dB` | basso / recupero netto |
+| `3.5 dB` | molto basso / recupero forte |
+| `4.0 dB` | estremamente basso / recupero massimo |
+
+Protezione LRA:
+
+| LRA | Cap automatico |
+|---:|---:|
+| `>= 16 LU` | massimo `3.5 dB` |
+| `>= 18 LU` | massimo `3.5 dB` |
+
+Il processore accetta comunque `0 .. 4.0 dB` come valore manuale. `0` resta utile per debug/A-B test, ma non è il comportamento automatico consigliato.
+
+Nota pratica: sopra **3.5 dB** il processor mostra un warning perché il limiter può iniziare a lavorare in modo percepibile sui picchi; `4.0 dB` resta una modalità spinta da validare in ascolto.
 
 ---
 
@@ -234,13 +251,15 @@ Se non trovi `soxr` nell'output:
 - `DECORR_GAIN` ridotti per non mascherare il centrale;
 - high shelf finale leggero a 12 kHz su canali non-LFE;
 - **FRONT_EQ**: EQ psicoacustico opzionale su frontali (−0.8 dB @ 320 Hz, +0.6 dB @ 5000 Hz, +0.7 dB shelf @ 11 kHz; default `g=0.7` sulla shelf per prudenza). Migliora articolazione su driver piccoli senza rubare al centro. Disabilita con `FRONT_EQ="anull"`;
-- master limiter finale con `aresample=192000 -> alimiter -> aresample=48000`.
+- master limiter finale con `aresample=192000 -> alimiter -> aresample=48000`;
+- limiter finale aggiornato: `limit=0.985:attack=2.5:release=50:level=1:latency=1`;
+- limiter LFE separato e più prudente: `limit=0.94`, per controllare i picchi del sub senza farlo diventare invadente.
 
 ### Caratteristiche
 
 - codec output `ac3` oppure `eac3`;
 - preset `aegis`, `sonar`, `wide`, `aura`, `voice`;
-- `volamp` finale opzionale da `0` a `2.5 dB`, applicato prima del limiter;
+- `volamp` finale da `0` a `4.0 dB`, default `2.5 dB`, applicato prima del master limiter;
 - selezione stream score-based: 6 canali, default, lingua italiana;
 - layout gestiti: `5.1`, `5.1(back)`, `5.1(side)`;
 - keep opzionale della traccia audio originale;
@@ -262,14 +281,14 @@ Se non trovi `soxr` nell'output:
 | `file` | file singolo | cartella corrente | se omesso processa i file compatibili nella directory |
 | `bitrate` | es. `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza suffisso |
 | `preset` | `aegis`, `sonar`, `wide`, `aura`, `voice` | `sonar` | modalità surround |
-| `volamp` | `0` - `2.5` | `1.5` | gain finale in dB prima del limiter; `0` = OFF |
+| `volamp` | `0` - `4.0` | `2.5` | make-up gain finale in dB prima del master limiter; `0` = OFF/debug |
 
 ### Esempi
 
 ```bash
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k sonar 1.5
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k wide 0
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 si "film.mkv" 640k voice 2
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k sonar 2.5
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k wide 3.0
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 si "film.mkv" 640k voice 2.5
 ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no
 ```
 
@@ -614,6 +633,31 @@ Surround virtualmente muti: falso 5.1 / front-heavy. Forzo VOICE.
 ```
 
 non è un bug: lo script sta evitando di applicare preset aggressivi su canali surround praticamente muti.
+
+### Il file processato suona troppo basso
+
+Controlla il valore scritto da `audio_analyzer_volamp_psycho.sh` nel batch:
+
+```bash
+grep -n 'volamp=' run_processing.sh
+```
+
+Il valore finale della riga è quello realmente passato al processore:
+
+```bash
+"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 3.0
+```
+
+Scala v2.5 consigliata:
+
+```text
+2.5 = make-up standard plus
+3.0 = recupero netto
+3.5 = recupero forte
+4.0 = massimo, da ascoltare con attenzione
+```
+
+Se arrivi spesso a `4.0 dB`, il file è realmente basso oppure il processing sta togliendo troppo livello percepito: meglio verificare con un confronto A/B contro la traccia originale preservata.
 
 ### Output già esistente
 

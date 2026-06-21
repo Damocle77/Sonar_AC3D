@@ -134,12 +134,18 @@ if [[ "$MULTI_FILES_MODE" == true ]]; then
 else
   info "Metrica: DELTA | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=auto"
 fi
-info "Volamp heuristic: target loudness prudente con step 0 / 1.5 / 2 / 2.5 dB"
+info "Volamp heuristic: make-up DSP 2.5 dB + recupero loudness con step 2.5 / 3 / 3.5 / 4 dB"
 
 # ── CONFIG ANALITICA INTERNA ──────────────────────────────────────────────────
 # Target domestico fisso: niente variabili da esportare prima del lancio.
 # -21 LUFS = compromesso home theater; -23 LUFS sarebbe piu' broadcast/reference.
 LOUDNESS_TARGET="-21.0"
+
+# Make-up gain minimo del processore.
+# Non rappresenta una sorgente "bassa": compensa la perdita percepita introdotta
+# da split/EQ/compressori/limiter della pipeline psicoacustica.
+VOLAMP_BASE="2.5"
+VOLAMP_MAX="4.0"
 
 # Se la media energetica dei surround e' sotto questa soglia, trattiamo il file
 # come falso 5.1 / front-heavy e forziamo un preset conservativo.
@@ -390,35 +396,41 @@ measure_stream_i_lra() {
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Euristica volamp da Loudness Integrata del file intero
-# Output consentiti: 0 | 1.5 | 2 | 2.5
+# Output consentiti automatici: 2.5 | 3 | 3.5 | 4
 # ────────────────────────────────────────────────────────────────────────────────
 loudness_to_volamp() {
   local i_val="$1"
-  # Controllo robusto: se i_val non è un numero valido, restituisco 0 (nessun boost). Evita errori di calcolo eccessivo o output non numerici.
-  [[ -n "$i_val" ]] || { echo "0"; return; }
-  [[ "$i_val" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "0"; return; }
+  # Se la misura non e' disponibile, uso comunque il make-up DSP standard.
+  [[ -n "$i_val" ]] || { echo "$VOLAMP_BASE"; return; }
+  [[ "$i_val" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "$VOLAMP_BASE"; return; }
 
   local deficit
   deficit=$(awk -v i="$i_val" -v t="$LOUDNESS_TARGET" 'BEGIN { printf "%.2f", (t - i) }')
-  # Se il deficit è molto basso, non serve boost. Poi step di 1.5/2/2.5 dB per boost crescente, con soglia massima prudente a 2.5 dB.
-  if awk -v d="$deficit" 'BEGIN { exit !(d < -0.5) }'; then
-    echo "0"
+
+  # V2.5: baseline leggermente piu' alta per compensare la perdita percepita
+  # della pipeline senza toccare voce/sub/surround.
+  # - 2.5 dB = make-up DSP standard
+  # - 3/3.5/4 = recupero crescente se la loudness integrata e' sotto target
+  if awk -v d="$deficit" 'BEGIN { exit !(d < 0.8) }'; then
+    echo "$VOLAMP_BASE"
   elif awk -v d="$deficit" 'BEGIN { exit !(d < 1.8) }'; then
-    echo "1.5"
-  elif awk -v d="$deficit" 'BEGIN { exit !(d < 2.3) }'; then
-    echo "2"
+    echo "3.0"
+  elif awk -v d="$deficit" 'BEGIN { exit !(d < 3.0) }'; then
+    echo "3.5"
   else
-    echo "2.5"
+    echo "$VOLAMP_MAX"
   fi
 }
 
 # Descrizione testuale del volamp consigliato, per display più umano e meno numerico. Allineata alla logica del processore: 0 = nessun boost, 1.5 = boost leggero, 2 = boost consigliato, 2.5 = boost massimo prudente.
 volamp_to_desc() {
   case "$1" in
-    0|0.0)   echo "Nessun incremento necessario" ;;
-    1.5)     echo "Lieve recupero loudness" ;;
-    2|2.0)   echo "Boost consigliato" ;;
-    2.5)     echo "Boost massimo prudente" ;;
+    2.5)     echo "Make-up DSP standard plus" ;;
+    3|3.0)   echo "Recupero loudness" ;;
+    3.5)     echo "Recupero loudness forte" ;;
+    4|4.0)   echo "Recupero massimo" ;;
+    2|2.0)   echo "Make-up DSP legacy" ;;
+    0|0.0)   echo "OFF manuale" ;;
     *)       echo "Boost custom" ;;
   esac
 }
@@ -427,11 +439,13 @@ volamp_to_desc() {
 source_volume_status() {
   local volamp="$1"
   case "$volamp" in
-    0|0.0) echo "OK" ;;
-    1.5)   echo "leggermente basso" ;;
-    2|2.0) echo "basso" ;;
-    2.5)   echo "molto basso" ;;
-    *)     echo "da verificare" ;;
+    2.5)     echo "standard / make-up DSP plus" ;;
+    3|3.0)   echo "basso" ;;
+    3.5)     echo "molto basso" ;;
+    4|4.0)   echo "estremamente basso" ;;
+    2|2.0)   echo "standard legacy" ;;
+    0|0.0)   echo "OFF manuale" ;;
+    *)       echo "da verificare" ;;
   esac
 }
 
@@ -445,12 +459,13 @@ source_volume_status() {
 # ───────────────────────────────────────────────────────────────────────────────────
 cap_volamp_by_lra() {
   local volamp="$1" lra="$2"
-  # Controllo robusto: se LRA non è un numero valido, restituisco il volamp originale senza limitazione. Evita errori di calcolo eccessivo o output non numerici.
   [[ -n "$lra" && "$lra" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "$volamp"; return; }
-  # Se LRA >= 16, il mix è molto dinamico: limito il volamp a 1.5 dB per non schiacciare un mix cinematografico sano. Se LRA è più basso, non limito il volamp, anche se è alto, perché potrebbe essere necessario per mix domestici più compressi.
-  if awk -v l="$lra" 'BEGIN { exit !(l >= 16.0) }'; then
-    if awk -v v="$volamp" 'BEGIN { exit !(v > 1.5) }'; then
-      echo "1.5"
+
+  # Mix molto dinamico: permetto recupero, ma evito 4 dB automatici quando
+  # la LRA e' estrema. Non scende mai sotto VOLAMP_BASE.
+  if awk -v l="$lra" 'BEGIN { exit !(l >= 18.0) }'; then
+    if awk -v v="$volamp" 'BEGIN { exit !(v > 3.5) }'; then
+      echo "3.5"
     else
       echo "$volamp"
     fi

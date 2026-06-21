@@ -57,12 +57,12 @@ PARAMETRI:
   bitrate   : Es. 640k o 768k (default: 640k per AC3, 768k per EAC3).
   preset    : aegis | sonar | wide | aura | voice (default: sonar).
   volamp    : Gain finale opzionale in dB prima del limiter.
-              Valori consentiti: 0 .. 2.5.
-              0 = OFF, default = 1.5 dB.
-              Esempi pratici: 0 | 1.0 | 1.5 | 2.0 | 2.5
+              Valori consentiti: 0 .. 4.0.
+              0 = OFF, default = 2.5 dB.
+              Esempi pratici: 0 | 2.5 | 3.0 | 3.5 | 4.0
 ESEMPIO:
   ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 si "film.mkv" 768k sonar
-  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 no "" 640k wide 1.5
+  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 no "" 640k wide 2.5
 
 PRESET DISPONIBILI:
   aegis     -> Simula NEURAL:X (DTS:X)  | Cupola Sonora
@@ -99,10 +99,10 @@ shift 2
 INPUT_FILE=""
 BITRATE=""
 SUR_MODE=""
-VOLAMP_DB="1.5"
+VOLAMP_DB="2.5"
 POSITIONAL=("$@")
 
-# Ultimo parametro opzionale = volamp (0 .. 2.5 dB)
+# Ultimo parametro opzionale = volamp (0 .. 4.0 dB)
 if (( ${#POSITIONAL[@]} > 0 )); then
   LAST_IDX=$((${#POSITIONAL[@]} - 1))
   LAST_ARG="${POSITIONAL[$LAST_IDX]}"
@@ -110,15 +110,15 @@ if (( ${#POSITIONAL[@]} > 0 )); then
 
   # Se l'ultimo parametro è un numero (con optional decimale), lo interpreto come volamp. Se è un numero grande (>=32), lo lascio al parser del bitrate.
   if [[ "$LAST_ARG" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-    if awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 0 && v <= 2.5) }'; then
-      VOLAMP_DB="$LAST_ARG"
+    if awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 0 && v <= 4.0) }'; then
+      VOLAMP_DB="2.5"
       unset 'POSITIONAL[$LAST_IDX]'
       POSITIONAL=("${POSITIONAL[@]}")
     elif awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 32) }'; then
       : # numero grande: è un bitrate senza suffisso, lo gestisce il parser bitrate
     else
       err "Valore numerico ambiguo: '$LAST_ARG'"
-      err "volamp ammette 0 .. 2.5 dB ; il bitrate va indicato >= 32 (es. 640 o 640k)."
+      err "volamp ammette 0 .. 4.0 dB ; il bitrate va indicato >= 32 (es. 640 o 640k)."
       exit 1
     fi
   fi
@@ -167,14 +167,14 @@ case "${OUT_CODEC}:${BITRATE,,}" in
     ;;
 esac
 
-# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 2.5 (con optional decimale).
+# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 4.0 (con optional decimale).
 if ! [[ "$VOLAMP_DB" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
-   ! awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v >= 0 && v <= 2.5) }'; then
-  err "volamp non valido: '$VOLAMP_DB'. Valori consentiti: 0 .. 2.5 dB"
+   ! awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v >= 0 && v <= 4.0) }'; then
+  err "volamp non valido: '$VOLAMP_DB'. Valori consentiti: 0 .. 4.0 dB"
   exit 1
 fi
 
-# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 2.5 (con optional decimale).
+# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 4.0 (con optional decimale).
 case "$VOLAMP_DB" in
   0|0.0|0.00|0.000)
     FINAL_GAIN_FILTER=""
@@ -185,6 +185,12 @@ case "$VOLAMP_DB" in
     VOLAMP_LABEL="+${VOLAMP_DB} dB"
     ;;
 esac
+
+# Guard rail: sopra 3.5 dB il limiter finale puo' iniziare a lavorare in modo udibile.
+# 4.0 resta permesso per sorgenti realmente basse, ma va trattato come modalita' spinta.
+if awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v > 3.5) }'; then
+  warn "volamp alto (${VOLAMP_DB} dB): controlla eventuale compressione percepita nei picchi."
+fi
 
 # Resampling finale HQ con SoX Resampler / SOXR. Precisione 28 bit, cutoff conservativo.
 ARESAMPLE_192K="aresample=192000:resampler=soxr:precision=28:cutoff=0.97"
@@ -372,35 +378,35 @@ set_preset_profile() {
       SUR_BLOCK="$SUR_FILTERS_SONAR"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
       DECORR_GAIN="$DECORR_GAIN_SONAR"
-      LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0:latency=1"
+      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="Sonar (Atmos Like)"
       ;;
     aegis)
       SUR_BLOCK="$SUR_FILTERS_AEGIS"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AEGIS}"
       DECORR_GAIN="$DECORR_GAIN_AEGIS"
-      LIMITER_OPTS="limit=0.98:attack=2.5:release=50:level=0:latency=1"
+      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="AEGIS (Neural:X Like)"
       ;;
     aura)
       SUR_BLOCK="$SUR_FILTERS_AURA"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AURA}"
       DECORR_GAIN="$DECORR_GAIN_AURA"
-      LIMITER_OPTS="limit=0.975:attack=3.0:release=60:level=0:latency=1"
+      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="AURA (Dolby 6.1 Like)"
       ;;
     wide)
       SUR_BLOCK="$SUR_FILTERS_WIDE"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_WIDE}"
       DECORR_GAIN="$DECORR_GAIN_WIDE"
-      LIMITER_OPTS="limit=0.97:attack=3.5:release=65:level=0:latency=1"
+      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="Wide (7.1 Like)"
       ;;
     voice)
       SUR_BLOCK="$SUR_FILTERS_VOICEONLY"
       VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_VOICEONLY}"
       DECORR_GAIN="$DECORR_GAIN_VOICE"
-      LIMITER_OPTS="limit=0.95:attack=2.0:release=40:level=0:latency=1"
+      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="VOICE (Dialogue Plus)"
       ;;
     *)
