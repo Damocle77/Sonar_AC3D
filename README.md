@@ -10,7 +10,7 @@ Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracc
 
 L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare solo il processing necessario**. Niente DSP opaco, niente pulsanti “enhance” usciti da un film poliziesco del 2003. Solo FFmpeg, euristiche dichiarate e preset psicoacustici ragionati.
 
-La suite è tarata per setup domestico a livello medio con diffusori compatti, subwoofer attivo, crossover intorno a **110 Hz**, ascolto a volume medio/basso e priorità all'intelligibilità della voce italiana. *(Testato su: AVR Yamaha RX-4RV, kit 5.1 JBL SCS200, subwoofer attivo Kenwood)*
+La suite è tarata per setup domestico a livello medio con diffusori compatti, subwoofer attivo, crossover intorno a **110 Hz**, ascolto a volume medio/basso e priorità all'intelligibilità della voce italiana. *(Testato su: AVR Yamaha RX-V4A, kit 5.1 JBL SCS200, subwoofer attivo Kenwood)*
 
 ### Schema di riferimento
 
@@ -211,12 +211,11 @@ Protezione LRA:
 
 | LRA | Cap automatico |
 |---:|---:|
-| `>= 16 LU` | massimo `3.5 dB` |
 | `>= 18 LU` | massimo `3.5 dB` |
 
-Il processore accetta comunque `0 .. 4.0 dB` come valore manuale. `0` resta utile per debug/A-B test, ma non è il comportamento automatico consigliato.
+Il processore accetta comunque `0 .. 6.0 dB` come valore manuale (default `3.0 dB`). `0` resta utile per debug/A-B test, ma non è il comportamento automatico consigliato. L'analyzer, invece, scrive nel batch solo valori automatici nell'intervallo **2.5 - 4.0 dB**.
 
-Nota pratica: sopra **3.5 dB** il processor mostra un warning perché il limiter può iniziare a lavorare in modo percepibile sui picchi; `4.0 dB` resta una modalità spinta da validare in ascolto.
+Nota pratica: sopra **4.5 dB** il processor mostra un warning perché il limiter può iniziare a lavorare in modo percepibile sui picchi; oltre `4.0 dB` è comunque una modalità spinta da validare in ascolto.
 
 ---
 
@@ -224,7 +223,7 @@ Nota pratica: sopra **3.5 dB** il processor mostra un warning perché il limiter
 
 Motore principale per tracce **5.1 esistenti**.
 
-Fa processing su centrale e surround, mantenendo LFE coerente con il mix sorgente e lasciando all'AVR/sub il lavoro principale sulle basse. La taratura è ottimizzata per **diffusori compatti con AVR crossover globale a 110 Hz**. *(Baseline hardware: AVR Yamaha RX-4RV, kit JBL SCS200)*
+Fa processing su centrale e surround, mantenendo LFE coerente con il mix sorgente e lasciando all'AVR/sub il lavoro principale sulle basse. La taratura è ottimizzata per **diffusori compatti con AVR crossover globale a 110 Hz**. *(Baseline hardware: AVR Yamaha RX-V4A, kit JBL SCS200)*
 
 ### Resampler di qualità (SOXR)
 
@@ -250,7 +249,7 @@ Se non trovi `soxr` nell'output:
 - air layer psicoacustico a **12/15 ms**, filtrato 1600-9500 Hz;
 - `DECORR_GAIN` ridotti per non mascherare il centrale;
 - high shelf finale leggero a 12 kHz su canali non-LFE;
-- **FRONT_EQ**: EQ psicoacustico opzionale su frontali (−0.8 dB @ 320 Hz, +0.6 dB @ 5000 Hz, +0.7 dB shelf @ 11 kHz; default `g=0.7` sulla shelf per prudenza). Migliora articolazione su driver piccoli senza rubare al centro. Disabilita con `FRONT_EQ="anull"`;
+- **FRONT_EQ**: EQ psicoacustico su frontali (−0.8 dB @ 320 Hz, +0.6 dB @ 5000 Hz, +0.7 dB shelf @ 11 kHz; default `g=0.7` sulla shelf per prudenza). Migliora articolazione su driver piccoli senza rubare al centro. È definito come variabile fissa nello script: per neutralizzarlo imposta `FRONT_EQ="anull"` direttamente nel file (non è sovrascrivibile da ambiente);
 - master limiter finale con `aresample=192000 -> alimiter -> aresample=48000`;
 - limiter finale aggiornato: `limit=0.985:attack=2.5:release=50:level=1:latency=1`;
 - limiter LFE separato e più prudente: `limit=0.94`, per controllare i picchi del sub senza farlo diventare invadente.
@@ -259,7 +258,7 @@ Se non trovi `soxr` nell'output:
 
 - codec output `ac3` oppure `eac3`;
 - preset `aegis`, `sonar`, `wide`, `aura`, `voice`;
-- `volamp` finale da `0` a `4.0 dB`, default `2.5 dB`, applicato prima del master limiter;
+- `volamp` finale da `0` a `6.0 dB`, default `3.0 dB`, applicato prima del master limiter;
 - selezione stream score-based: 6 canali, default, lingua italiana;
 - layout gestiti: `5.1`, `5.1(back)`, `5.1(side)`;
 - keep opzionale della traccia audio originale;
@@ -281,7 +280,7 @@ Se non trovi `soxr` nell'output:
 | `file` | file singolo | cartella corrente | se omesso processa i file compatibili nella directory |
 | `bitrate` | es. `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza suffisso |
 | `preset` | `aegis`, `sonar`, `wide`, `aura`, `voice` | `sonar` | modalità surround |
-| `volamp` | `0` - `4.0` | `2.5` | make-up gain finale in dB prima del master limiter; `0` = OFF/debug |
+| `volamp` | `0` - `6.0` | `3.0` | make-up gain finale in dB prima del master limiter; `0` = OFF/debug |
 
 ### Esempi
 

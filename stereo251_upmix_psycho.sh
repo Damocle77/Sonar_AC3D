@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
-# set -e rimosso: causa exit imprevedibili su pattern && / || e aritmetica bash.
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   stereo251_upmix.sh - Giugno 2026                                           │
+# │   stereo251_upmix.sh - Luglio 2026                                           │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Motore di upmix offline da Stereo a 5.1 (EAC3/AC3),                        │

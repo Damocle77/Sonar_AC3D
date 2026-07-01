@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# set -e rimosso: causa exit imprevedibili su pattern && / || e aritmetica bash.
-# La gestione errori e' esplicita nei punti critici (|| continue, || true, etc.)
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   asmr_vr_intimate.sh - Giugno 2026                                          │
+# │   asmr_vr_intimate.sh - Luglio 2026                                          │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Processing binaurale ottimizzato per ASMR / VR / contenuto intimo.         │

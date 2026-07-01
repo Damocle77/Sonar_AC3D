@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────────╮
-# │   aegis_sonar_wide_aura_voice_volamp_psycho.sh - Giugno 2026                     │
+# │   aegis_sonar_wide_aura_voice_volamp_psycho.sh - Luglio 2026                     │
 # │   By Sandro (D@mocle77) Sabbioni                                                 │
 # │                                                                                  │
 # │   Motore di processing audio offline per tracce 5.1 (EAC3/AC3).                  │
@@ -57,12 +57,12 @@ PARAMETRI:
   bitrate   : Es. 640k o 768k (default: 640k per AC3, 768k per EAC3).
   preset    : aegis | sonar | wide | aura | voice (default: sonar).
   volamp    : Gain finale opzionale in dB prima del limiter.
-              Valori consentiti: 0 .. 4.0.
-              0 = OFF, default = 2.5 dB.
-              Esempi pratici: 0 | 2.5 | 3.0 | 3.5 | 4.0
+              Valori consentiti: 0 .. 6.0.
+              0 = OFF, default = 3.0 dB.
+              Esempi pratici: 0 | 3.0 | 4.0 | 5.0 | 6.0
 ESEMPIO:
   ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 si "film.mkv" 768k sonar
-  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 no "" 640k wide 2.5
+  ./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 no "" 640k wide 3.0
 
 PRESET DISPONIBILI:
   aegis     -> Simula NEURAL:X (DTS:X)  | Cupola Sonora
@@ -99,10 +99,10 @@ shift 2
 INPUT_FILE=""
 BITRATE=""
 SUR_MODE=""
-VOLAMP_DB="2.5"
+VOLAMP_DB="3.0"
 POSITIONAL=("$@")
 
-# Ultimo parametro opzionale = volamp (0 .. 4.0 dB)
+# Ultimo parametro opzionale = volamp (0 .. 6.0 dB)
 if (( ${#POSITIONAL[@]} > 0 )); then
   LAST_IDX=$((${#POSITIONAL[@]} - 1))
   LAST_ARG="${POSITIONAL[$LAST_IDX]}"
@@ -110,15 +110,15 @@ if (( ${#POSITIONAL[@]} > 0 )); then
 
   # Se l'ultimo parametro è un numero (con optional decimale), lo interpreto come volamp. Se è un numero grande (>=32), lo lascio al parser del bitrate.
   if [[ "$LAST_ARG" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-    if awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 0 && v <= 4.0) }'; then
-      VOLAMP_DB="2.5"
+    if awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 0 && v <= 6.0) }'; then
+      VOLAMP_DB="$LAST_ARG"
       unset 'POSITIONAL[$LAST_IDX]'
       POSITIONAL=("${POSITIONAL[@]}")
     elif awk -v v="$LAST_ARG" 'BEGIN { exit !(v >= 32) }'; then
       : # numero grande: è un bitrate senza suffisso, lo gestisce il parser bitrate
     else
       err "Valore numerico ambiguo: '$LAST_ARG'"
-      err "volamp ammette 0 .. 4.0 dB ; il bitrate va indicato >= 32 (es. 640 o 640k)."
+      err "volamp ammette 0 .. 6.0 dB ; il bitrate va indicato >= 32 (es. 640 o 640k)."
       exit 1
     fi
   fi
@@ -167,14 +167,14 @@ case "${OUT_CODEC}:${BITRATE,,}" in
     ;;
 esac
 
-# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 4.0 (con optional decimale).
+# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 6.0 (con optional decimale).
 if ! [[ "$VOLAMP_DB" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
-   ! awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v >= 0 && v <= 4.0) }'; then
-  err "volamp non valido: '$VOLAMP_DB'. Valori consentiti: 0 .. 4.0 dB"
+   ! awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v >= 0 && v <= 6.0) }'; then
+  err "volamp non valido: '$VOLAMP_DB'. Valori consentiti: 0 .. 6.0 dB"
   exit 1
 fi
 
-# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 4.0 (con optional decimale).
+# Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 6.0 (con optional decimale).
 case "$VOLAMP_DB" in
   0|0.0|0.00|0.000)
     FINAL_GAIN_FILTER=""
@@ -186,9 +186,9 @@ case "$VOLAMP_DB" in
     ;;
 esac
 
-# Guard rail: sopra 3.5 dB il limiter finale puo' iniziare a lavorare in modo udibile.
-# 4.0 resta permesso per sorgenti realmente basse, ma va trattato come modalita' spinta.
-if awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v > 3.5) }'; then
+# Guard rail: sopra 4.5 dB il limiter finale puo' iniziare a lavorare in modo udibile.
+# fino a 6.0 resta permesso per sorgenti realmente basse, ma va trattato come modalita' spinta.
+if awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v > 4.5) }'; then
   warn "volamp alto (${VOLAMP_DB} dB): controlla eventuale compressione percepita nei picchi."
 fi
 
@@ -452,7 +452,7 @@ build_output_join_graph() {
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,highpass=f=32,lowpass=f=110,acompressor=threshold=-6dB:ratio=3.0:attack=8:release=120:makeup=1.0,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
+[LFE]aformat=channel_layouts=mono,highpass=f=32,lowpass=f=110,acompressor=threshold=-6dB:ratio=3.0:attack=6:release=120:makeup=1.1,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,

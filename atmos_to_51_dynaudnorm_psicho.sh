@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   atmos_to_51_dynaudnorm_psicho.sh - Giugno 2026                             │
+# │   atmos_to_51_dynaudnorm_psicho.sh - Luglio 2026                             │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Prende un file con traccia EAC3 Atmos (JOC) e produce un MKV con:          │
@@ -109,6 +109,13 @@ BITRATE="${2:-640k}"
 # coupling=1     : canali accoppiati — preserva l'immagine stereo/surround
 # altboundary=0  : boundary mode standard
 DYNAUDNORM="highpass=f=20:t=q:w=0.707,dynaudnorm=framelen=500:gausssize=31:peak=0.92:maxgain=4:targetrms=0:compress=0:coupling=1:altboundary=0"
+
+# Protezione sub (Kenwood 100W): l'LFE viene isolato e trattato come nel motore aegis.
+# highpass=32  : taglia il subsonico sotto i 32 Hz (escursione inutile che stressa il cono)
+# lowpass=110  : combacia col crossover 110 Hz dell'AVR — niente banda 110-120 di troppo
+# acompressor  : ratio 3.0 doma i picchi dell'effetto .1 senza schiacciare il corpo
+# alimiter     : guardiano finale a 0.94 contro i transienti che farebbero "sboxare" il sub
+LFE_GUARD="highpass=f=32,lowpass=f=110,acompressor=threshold=-6dB:ratio=3.0:attack=6:release=120:makeup=1.1,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1"
 
 # Probe: trova traccia EAC3 Atmos (JOC)
 find_atmos_stream() {
@@ -233,6 +240,7 @@ FILES=("${FILTERED_FILES[@]}")
 # Mostra info
 info "Bitrate 5.1: $BITRATE"
 info "dynaudnorm:  $DYNAUDNORM"
+info "LFE guard:   $LFE_GUARD"
 echo ""
 
 # Ciclo elaborazione
@@ -293,8 +301,9 @@ for CUR_FILE in "${FILES[@]}"; do
     fi
   fi
 
-  # Filter complex per traccia 5.1 con dynaudnorm
-  FILTER_COMPLEX="[0:${A_IDX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L}|SR=${SUR_R},${DYNAUDNORM}[aout]"
+  # Filter complex per traccia 5.1: dynaudnorm sull'intero 5.1 (coupling attivo -> immagine
+  # surround preservata), poi ramo LFE dedicato per proteggere il sub (split/guard/join).
+  FILTER_COMPLEX="[0:${A_IDX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L}|SR=${SUR_R},${DYNAUDNORM},channelsplit=channel_layout=5.1(side)[FL][FR][FC][LFE][SL][SR];[LFE]${LFE_GUARD}[LFEp];[FL][FR][FC][LFEp][SL][SR]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR[aout]"
 
   # FFmpeg command
   CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning)

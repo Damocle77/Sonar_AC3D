@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # ╭─────────────────────────────────────────────────────────────────────────────────╮
-# │   audio_analyzer_volamp_psycho.sh - Giugno 2026                                 │
+# │   audio_analyzer_volamp_psycho.sh - Luglio 2026                                 │
 # │   By Sandro (D@mocle77) Sabbioni                                                │
 # │                                                                                 │
 # │   Sonda euristica per l'analisi offline di container multimediali 5.1.          │
