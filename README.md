@@ -10,7 +10,7 @@ Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e tra
 
 La filosofia è semplice: **misurare prima, processare dopo**. L'analyzer stima il rapporto fra centrale e surround, sceglie il preset più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
 
-La taratura 5.1 è pensata per un impianto domestico con diffusori compatti, subwoofer attivo, crossover AVR intorno a **110 Hz**, ascolto medio/basso e priorità all'intelligibilità della voce italiana. Setup di riferimento: **Yamaha RX-V4A, JBL SCS200, doppio subwoofer Kenwood SW-40HT**.
+La taratura 5.1 è pensata per un impianto domestico con diffusori compatti, subwoofer attivo, crossover AVR intorno a **110 Hz**, ascolto medio/basso e priorità all'intelligibilità della voce italiana. Setup di riferimento: **Yamaha RX-V4A, JBL SCS200, subwoofer Kenwood SW-40HT**.
 
 ## Schema di riferimento
 
