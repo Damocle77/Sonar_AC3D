@@ -7,10 +7,10 @@
 # │     • Traccia 1: EAC3 5.1 standard con normalizzazione dinamica (default)    │
 # │     • Traccia 2: EAC3 Atmos originale (copia bit-perfect)                    │
 # │                                                                              │
-# │   La decodifica FFmpeg di EAC3 JOC produce il bed 5.1 automaticamente        │
-# │   (FFmpeg non ha un renderer Atmos a oggetti). dynaudnorm equalizza la       │
-# │   dinamica senza compressione distruttiva, ideale per ascolto notturno       │
-# │   o sistemi senza ampia escursione dinamica.                                 │
+# │   La decodifica FFmpeg di EAC3 JOC espone il bed 5.1 compatibile; FFmpeg    │
+# │   non esegue il rendering degli oggetti Atmos. dynaudnorm applica una        │
+# │   normalizzazione dinamica conservativa al bed, che resta lo stadio          │
+# │   primario da analizzare/elaborare con i preset psicoacustici.                                 │
 # │                                                                              │
 # │   UTILIZZO:                                                                  │
 # │     ./atmos_to_51_dynaudnorm_psicho.sh <file|directory|""> [bitrate]         │
@@ -96,108 +96,114 @@ done
 # Parametri
 INPUT_ARG="${1:-}"
 BITRATE="${2:-640k}"
-# Check validità bitrate (numero con optional k/m, default k)
+# Normalizzazione e validazione bitrate EAC3 5.1.
 [[ "$BITRATE" =~ ^[0-9]+([kKmM])?$ ]] || { err "Bitrate '$BITRATE' non valido. Es: 640k, 768k."; exit 1; }
-[[ "$BITRATE" =~ [kKmM]$ ]] || BITRATE="${BITRATE}k"
+BITRATE_LC="${BITRATE,,}"
+if [[ "$BITRATE_LC" =~ ^([0-9]+)$ ]]; then
+  BITRATE_KBPS="${BASH_REMATCH[1]}"
+elif [[ "$BITRATE_LC" =~ ^([0-9]+)k$ ]]; then
+  BITRATE_KBPS="${BASH_REMATCH[1]}"
+elif [[ "$BITRATE_LC" =~ ^([0-9]+)m$ ]]; then
+  BITRATE_KBPS="$(( ${BASH_REMATCH[1]} * 1000 ))"
+else
+  err "Bitrate '$BITRATE' non valido. Es: 640k, 768k."
+  exit 1
+fi
+if (( BITRATE_KBPS < 256 || BITRATE_KBPS > 768 || ((BITRATE_KBPS - 256) % 64) != 0 )); then
+  err "Bitrate EAC3 5.1 non consentito: ${BITRATE_KBPS}k"
+  err "Consentiti: 256k, 320k, 384k, 448k, 512k, 576k, 640k, 704k, 768k"
+  exit 1
+fi
+BITRATE="${BITRATE_KBPS}k"
 
 # Dynaudnorm: parametri conservativi per normalizzazione domestica/notturna
 # framelen=500   : finestra 500ms — buon compromesso reattività/smoothness
 # gausssize=31   : finestra gaussiana 31 frame — smoothing ampio (no pumping)
-# peak/maxgain   : conservativi per non schiacciare la dinamica
-# targetrms=0    : disabilitato — lavora solo su peak, non su RMS
-# compress=0     : disabilitato — nessuna compressione aggiuntiva
+# peak=0.92      : picco target lineare del normalizzatore
+# maxgain=4      : fattore lineare massimo (non 4 dB; circa +12 dB nominali)
+# targetrms=0    : target RMS disabilitato; controllo guidato dai picchi
+# compress=0     : compressione opzionale interna disabilitata
 # coupling=1     : canali accoppiati — preserva l'immagine stereo/surround
 # altboundary=0  : boundary mode standard
 DYNAUDNORM="highpass=f=20:t=q:w=0.707,dynaudnorm=framelen=500:gausssize=31:peak=0.92:maxgain=4:targetrms=0:compress=0:coupling=1:altboundary=0"
 
-# Protezione sub (Kenwood 100W): l'LFE viene isolato e trattato come nel motore aegis.
-# highpass=32  : taglia il subsonico sotto i 32 Hz (escursione inutile che stressa il cono)
-# lowpass=110  : combacia col crossover 110 Hz dell'AVR — niente banda 110-120 di troppo
-# acompressor  : ratio 3.0 doma i picchi dell'effetto .1 senza schiacciare il corpo
-# alimiter     : guardiano finale a 0.94 contro i transienti che farebbero "sboxare" il sub
-LFE_GUARD="highpass=f=32,lowpass=f=110,acompressor=threshold=-6dB:ratio=3.0:attack=6:release=120:makeup=1.1,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1"
+# NB: nessun filtro LFE qui. Questo script e' solo pre-stadio di aegis_sonar_wide_aura_voice_volamp_psycho.sh,
+# che gestisce interamente l'LFE (highpass 32 + lowpass 110 + limiter picchi sub). Applicare qui gli stessi
+# highpass/lowpass creerebbe un doppio band-pass (ordine raddoppiato, -6 dB ai corner 32/110 Hz): ridondante e dannoso.
 
 # Probe: trova traccia EAC3 Atmos (JOC)
 find_atmos_stream() {
   local f="$1"
-  local _lines
+  local raw_data
 
-  # Probe base: indice globale, codec, canali, lingua (no profilo = no spazi insidiosi)
-  # tr -d '\r': su Git Bash/Windows ffprobe emette CRLF, il \r sporcherebbe lingua/joc.
-  mapfile -t _lines < <(ffprobe -v error -select_streams a \
-    -show_entries stream=index,codec_name,channels:stream_tags=language \
-    -of csv=p=0 "$f" 2>/dev/null | tr -d '\r' || true)
-  # Se non ci sono tracce audio, esci subito
-  [[ ${#_lines[@]} -gt 0 ]] || return 1
-  # Loop sulle righe probe: idx,codec,ch,lang
-  local best_idx="" best_ch=0 best_lang="" fallback_idx="" fallback_ch=0 fallback_lang=""
+  # Un solo probe per i dati stabili. L'ordinale audio viene conservato per
+  # interrogare profile/joc_complexity sui singoli stream.
+  raw_data=$(ffprobe -v error -select_streams a \
+    -show_entries stream=index,codec_name,channels:stream_disposition=default:stream_tags=language \
+    -of csv=p=0 "$f" 2>/dev/null | tr -d '' || true)
+  [[ -n "$raw_data" ]] || return 1
+
+  local best_atmos="" best_atmos_score=-1
+  local best_fallback="" best_fallback_score=-1
   local audio_ord=0
+  local lines
+  mapfile -t lines <<< "$raw_data"
 
-  # Loop sulle righe probe
-  for line in "${_lines[@]}"; do
-    # Riga vuota = nessuno stream: NON incrementare l'ordinale audio, altrimenti
-    # i probe successivi 'a:${audio_ord}' (profilo/joc) si disallineano.
+  for line in "${lines[@]}"; do
     [[ -z "$line" ]] && continue
 
-    local idx codec ch lang
-    IFS=',' read -r idx codec ch lang <<<"$line"
+    local idx codec ch def lang
+    IFS=',' read -r idx codec ch def lang <<<"$line"
     codec="${codec:-}"
     ch="${ch:-0}"
-    lang="${lang:-}"
+    def="${def:-0}"
+    lang="${lang:-und}"
 
-    # Solo EAC3
-    if [[ "$codec" != "eac3" ]]; then
-      ((audio_ord++)) || true
+    # L'ordinale audio va incrementato per ogni stream audio, anche non EAC3.
+    if [[ "$codec" != "eac3" || ! "$ch" =~ ^[0-9]+$ || "$ch" -lt 6 ]]; then
+      ((audio_ord+=1))
       continue
     fi
-    # Solo tracce con 6+ canali
-    local is_atmos=false
 
-    # Metodo 1: profilo contiene "atmos" (usa indice relativo audio, non globale)
-    local profile_str
+    local is_atmos=false profile_str joc
     profile_str=$(ffprobe -v error -select_streams "a:${audio_ord}" \
-      -show_entries stream=profile \
-      -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d '\r' || true)
+      -show_entries stream=profile -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d '' || true)
     [[ "${profile_str,,}" == *"atmos"* ]] && is_atmos=true
 
-    # Metodo 2: check joc_complexity via side_data (FFmpeg 5+)
     if [[ "$is_atmos" == false ]]; then
-      local joc
       joc=$(ffprobe -v error -select_streams "a:${audio_ord}" \
-        -show_entries frame_side_data=joc_complexity \
-        -read_intervals "%+#1" \
-        -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d '\r' || true)
+        -show_entries frame_side_data=joc_complexity -read_intervals "%+#1" \
+        -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d '' || true)
       [[ -n "$joc" && "$joc" != "0" ]] && is_atmos=true
     fi
 
-    # Selezione traccia migliore: preferiamo Atmos, ma se non c'è prendiamo il primo EAC3 6+ canali.
-    if [[ "$is_atmos" == true && "$ch" =~ ^[0-9]+$ && "$ch" -ge 6 ]]; then
-      # Preferisci italiano, ma non sostituire un italiano gia' selezionato
-      # (altrimenti con piu' tracce ITA vincerebbe l'ultima, non-deterministico).
-      if [[ -z "$best_idx" ]] || { [[ "${lang,,}" =~ ^it ]] && [[ ! "${best_lang,,}" =~ ^it ]]; }; then
-        best_idx="$idx"
-        best_ch="$ch"
-        best_lang="$lang"
+    local score=0
+    [[ "$def" == "1" ]] && score=$((score + 200))
+    [[ "${lang,,}" =~ ^it ]] && score=$((score + 300))
+
+    if [[ "$is_atmos" == true ]]; then
+      if (( score > best_atmos_score )); then
+        best_atmos_score=$score
+        best_atmos="${idx}|${ch}|${lang}|atmos"
       fi
-    # Fallback: se non troviamo Atmos, prendiamo il primo EAC3 6+ canali (potrebbe essere Atmos non rilevato via probe)  
-    elif [[ "$ch" =~ ^[0-9]+$ && "$ch" -ge 6 && -z "$fallback_idx" ]]; then
-      fallback_idx="$idx"
-      fallback_ch="$ch"
-      fallback_lang="$lang"
+    elif (( score > best_fallback_score )); then
+      best_fallback_score=$score
+      best_fallback="${idx}|${ch}|${lang}|fallback"
     fi
 
-    ((audio_ord++)) || true
+    ((audio_ord+=1))
   done
-  # Restituisci risultato: idx|ch|lang|type
-  if [[ -n "$best_idx" ]]; then
-    echo "${best_idx}|${best_ch}|${best_lang}|atmos"
+
+  if [[ -n "$best_atmos" ]]; then
+    echo "$best_atmos"
     return 0
   fi
 
-  # Fallback: EAC3 multichannel (potrebbe essere Atmos non rilevato via probe — FFmpeg non espone il profilo in certi container)
-  if [[ -n "$fallback_idx" ]]; then
-    warn "Nessun flag Atmos esplicito trovato — uso traccia EAC3 ${fallback_ch}ch (idx:${fallback_idx}) come fallback"
-    echo "${fallback_idx}|${fallback_ch}|${fallback_lang}|fallback"
+  if [[ -n "$best_fallback" ]]; then
+    local fb_idx fb_ch fb_lang fb_type
+    IFS='|' read -r fb_idx fb_ch fb_lang fb_type <<<"$best_fallback"
+    warn "Nessun flag Atmos esplicito trovato — uso traccia EAC3 ${fb_ch}ch (idx:${fb_idx}) come fallback" >&2
+    echo "$best_fallback"
     return 0
   fi
 
@@ -240,11 +246,13 @@ FILES=("${FILTERED_FILES[@]}")
 # Mostra info
 info "Bitrate 5.1: $BITRATE"
 info "dynaudnorm:  $DYNAUDNORM"
-info "LFE guard:   $LFE_GUARD"
 echo ""
 
 # Ciclo elaborazione
 OVERWRITE_ALL=false
+OK_COUNT=0
+ERR_COUNT=0
+SKIP_COUNT=0
 
 # Ciclo sui file
 for CUR_FILE in "${FILES[@]}"; do
@@ -253,6 +261,7 @@ for CUR_FILE in "${FILES[@]}"; do
   # Trova traccia Atmos/EAC3
   PROBE_RESULT=$(find_atmos_stream "$CUR_FILE") || {
     warn "Nessuna traccia EAC3 multichannel trovata → salto."
+    ((SKIP_COUNT+=1))
     continue
   }
   # Split probe result: idx|ch|lang|type
@@ -262,7 +271,9 @@ for CUR_FILE in "${FILES[@]}"; do
 
   # Determina layout per il pan filter
   # EAC3 Atmos decodificato esce tipicamente come 5.1(side)
-  A_LAYOUT=$(ffprobe -v error -select_streams a     -show_entries stream=index,channel_layout     -of csv=p=0 "$CUR_FILE" 2>/dev/null | tr -d '\r' | awk -F',' -v idx="$A_IDX" '$1==idx { print $2; exit }' || true)
+  A_LAYOUT=$(ffprobe -v error -select_streams a \
+    -show_entries stream=index,channel_layout -of csv=p=0 "$CUR_FILE" 2>/dev/null | \
+    tr -d '\r' | awk -F',' -v idx="$A_IDX" '$1==idx { print $2; exit }' || true)
 
   # Se il layout non è esposto (capita con certi container), deduciamo da ch count
   if [[ -z "$A_LAYOUT" && "$A_CH" -ge 6 ]]; then
@@ -295,15 +306,22 @@ for CUR_FILE in "${FILES[@]}"; do
   # Gestione sovrascrittura
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
-      confirm_overwrite "$OUT_FILE" || { info "Salto '$CUR_FILE'."; continue; }
+      confirm_overwrite "$OUT_FILE" || { info "Salto '$CUR_FILE'."; ((SKIP_COUNT+=1)); continue; }
     else
       info "Sovrascrittura automatica: '$OUT_FILE'"
     fi
   fi
 
   # Filter complex per traccia 5.1: dynaudnorm sull'intero 5.1 (coupling attivo -> immagine
-  # surround preservata), poi ramo LFE dedicato per proteggere il sub (split/guard/join).
-  FILTER_COMPLEX="[0:${A_IDX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L}|SR=${SUR_R},${DYNAUDNORM},channelsplit=channel_layout=5.1(side)[FL][FR][FC][LFE][SL][SR];[LFE]${LFE_GUARD}[LFEp];[FL][FR][FC][LFEp][SL][SR]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR[aout]"
+  # surround preservata). Nessun trattamento LFE qui: lo fa interamente aegis (stadio finale).
+  FILTER_COMPLEX="[0:${A_IDX}]aformat=sample_rates=48000:sample_fmts=fltp:channel_layouts=${IN_LAYOUT},pan=5.1(side)|FL=FL|FR=FR|FC=FC|LFE=LFE|SL=${SUR_L}|SR=${SUR_R},${DYNAUDNORM}[aout]"
+
+  # Titolo accurato: nel fallback la natura Atmos non e' stata verificata.
+  if [[ "$A_TYPE" == "atmos" ]]; then
+    ORIG_TITLE="EAC3 Atmos (Original)"
+  else
+    ORIG_TITLE="EAC3 Multichannel (Original - Atmos non verificato)"
+  fi
 
   # FFmpeg command
   CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning)
@@ -327,7 +345,7 @@ for CUR_FILE in "${FILES[@]}"; do
     # Traccia 2: Atmos originale (copia bit-perfect)
     -map "0:${A_IDX}"
     -c:a:1 copy
-    -metadata:s:a:1 "title=EAC3 Atmos (Original)"
+    -metadata:s:a:1 "title=${ORIG_TITLE}"
     -disposition:a:1 0
   )
 
@@ -341,8 +359,22 @@ for CUR_FILE in "${FILES[@]}"; do
 
   # Esecuzione
   info "Avvio encoding..."
-  "${CMD[@]}" && ok "Creato: $OUT_FILE" || warn "Errore su: $CUR_FILE"
+  if "${CMD[@]}"; then
+    ok "Creato: $OUT_FILE"
+    ((OK_COUNT+=1))
+  else
+    warn "Errore su: $CUR_FILE"
+    ((ERR_COUNT+=1))
+  fi
   echo ""
 done
 
-ok "Elaborazione completata."
+if (( ERR_COUNT > 0 )); then
+  err "Elaborazione completata con errori: OK=$OK_COUNT, FALLITI=$ERR_COUNT, SALTATI=$SKIP_COUNT"
+  exit 1
+fi
+if (( OK_COUNT == 0 )); then
+  warn "Nessun file elaborato: SALTATI=$SKIP_COUNT"
+  exit 0
+fi
+ok "Elaborazione completata: OK=$OK_COUNT, FALLITI=0, SALTATI=$SKIP_COUNT"

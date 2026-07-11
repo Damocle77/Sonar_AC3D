@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   asmr_vr_intimate.sh - Luglio 2026                                          │
+# │   asmr_vr_intimate_psycho.sh - Luglio 2026                                          │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Processing binaurale ottimizzato per ASMR / VR / contenuto intimo.         │
@@ -36,10 +36,12 @@ done
 
 # bs2b e' un filtro opzionale (richiede FFmpeg compilato con libbs2b): lo verifichiamo
 # subito per dare un errore chiaro invece di un crash a meta' encoding.
-if ! ffmpeg -hide_banner -filters 2>/dev/null | grep -qw bs2b; then
+FFMPEG_FILTERS="$(ffmpeg -hide_banner -filters 2>/dev/null || true)"
+if ! grep -qw bs2b <<<"$FFMPEG_FILTERS"; then
   err "Il filtro 'bs2b' non e' disponibile in questo FFmpeg (serve libbs2b). Usa un build completo (es. ffmpeg full)."
   exit 1
 fi
+unset FFMPEG_FILTERS
 
 OUTDIR=""
 KEEP_ORIG=0
@@ -116,10 +118,18 @@ case "$OUT_CODEC" in
   *)    A_ENCODER="$OUT_CODEC" ;;
 esac
 
-[[ "$OUT_BITRATE" =~ ^[0-9]+(k|M)?$ ]] || [[ "$OUT_CODEC" == "flac" ]] || { err "Bitrate '$OUT_BITRATE' non valido. Es: 192k, 256k, 320k."; exit 1; }
-[[ "$OUT_BITRATE" =~ k$|M$ ]] || OUT_BITRATE="${OUT_BITRATE}k"
+if [[ "$OUT_CODEC" != "flac" ]]; then
+  [[ "$OUT_BITRATE" =~ ^[0-9]+([kKmM])?$ ]] || { err "Bitrate '$OUT_BITRATE' non valido. Es: 192k, 256k, 320k."; exit 1; }
+  [[ "$OUT_BITRATE" =~ [kKmM]$ ]] || OUT_BITRATE="${OUT_BITRATE}k"
+  OUT_BITRATE="${OUT_BITRATE,,}"
+fi
 
 (( $# == 0 )) && { err "Nessun file specificato. Usa -h per l'aiuto."; exit 1; }
+
+if [[ -n "$OUTDIR" ]] && ! mkdir -p "$OUTDIR"; then
+  err "Impossibile creare la cartella di output: $OUTDIR"
+  exit 1
+fi
 
 LFO_STATUS="Disattivo"; [[ "$USE_LFO" -eq 1 ]] && LFO_STATUS="Attivo"
 info "Preset:  ${DISTANCE_MODE^^}"
@@ -202,17 +212,24 @@ pick_best_stereo_stream() {
 #   5. stereotools — regola ampiezza stereo (slev/mlev)
 #   6. pan — leggero crosstalk per simulare vicinanza (coefficienti statici)
 #   7. EQ psicoacustico — rinforza frequenze di prossimita'
-#   8. alimiter — safety net (level non specificato = default, ok per ASMR)
+#   8. ITD ed eventuale LFO
+#   9. alimiter finale — safety net dopo ogni modulazione, senza auto-level
 # ────────────────────────────────────────────────────────────────────────────────
 
 # WHISPER (20-30cm)
-FILTER_WHISPER="highpass=f=60:order=2,lowpass=f=15000,loudnorm=I=-20:TP=-2.0:LRA=13,aresample=48000,bs2b=profile=jmeier,stereotools=balance_in=0:slev=0.75:mlev=1.10:phase=0,pan=stereo|c0=1.04*c0+0.12*c1|c1=0.12*c0+1.04*c1,equalizer=f=85:t=q:w=1.6:g=2.0,equalizer=f=140:t=q:w=1.4:g=1.3,equalizer=f=320:t=q:w=1.2:g=-1.1,equalizer=f=2800:t=q:w=1.8:g=1.6,equalizer=f=5800:t=q:w=2.0:g=-1.7,alimiter=limit=0.96:attack=2:release=40"
+FILTER_WHISPER="highpass=f=60:poles=2,lowpass=f=15000,loudnorm=I=-20:TP=-2.0:LRA=13,aresample=48000,bs2b=profile=jmeier,stereotools=balance_in=0:slev=0.75:mlev=1.10:phase=0,pan=stereo|c0=1.04*c0+0.12*c1|c1=0.12*c0+1.04*c1,equalizer=f=85:t=q:w=1.6:g=2.0,equalizer=f=140:t=q:w=1.4:g=1.3,equalizer=f=320:t=q:w=1.2:g=-1.1,equalizer=f=2800:t=q:w=1.8:g=1.6,equalizer=f=5800:t=q:w=2.0:g=-1.7"
 
 # NEAR (30-50cm)
-FILTER_NEAR="highpass=f=70:order=2,lowpass=f=14500,loudnorm=I=-19:TP=-1.8:LRA=12,aresample=48000,bs2b=profile=jmeier,stereotools=balance_in=0:slev=0.70:mlev=1.06:phase=0,pan=stereo|c0=1.05*c0+0.10*c1|c1=0.10*c0+1.05*c1,equalizer=f=100:t=q:w=1.5:g=1.5,equalizer=f=3200:t=q:w=1.6:g=1.2,equalizer=f=6200:t=q:w=2.0:g=-1.5,alimiter=limit=0.97:attack=2.5:release=45"
+FILTER_NEAR="highpass=f=70:poles=2,lowpass=f=14500,loudnorm=I=-19:TP=-1.8:LRA=12,aresample=48000,bs2b=profile=jmeier,stereotools=balance_in=0:slev=0.70:mlev=1.06:phase=0,pan=stereo|c0=1.05*c0+0.10*c1|c1=0.10*c0+1.05*c1,equalizer=f=100:t=q:w=1.5:g=1.5,equalizer=f=3200:t=q:w=1.6:g=1.2,equalizer=f=6200:t=q:w=2.0:g=-1.5"
 
 # CENTER (Frontal)
-FILTER_CENTER="highpass=f=80:order=2,lowpass=f=14000,loudnorm=I=-18:TP=-1.5:LRA=11,aresample=48000,bs2b=profile=jmeier,stereotools=balance_in=0:slev=0.65:mlev=1.04:phase=0,pan=stereo|c0=1.06*c0+0.08*c1|c1=0.08*c0+1.06*c1,equalizer=f=120:t=q:w=1.4:g=1.1,equalizer=f=3200:t=q:w=1.8:g=1.0,equalizer=f=6200:t=q:w=2.2:g=-1.4,alimiter=limit=0.97:attack=3:release=50"
+FILTER_CENTER="highpass=f=80:poles=2,lowpass=f=14000,loudnorm=I=-18:TP=-1.5:LRA=11,aresample=48000,bs2b=profile=jmeier,stereotools=balance_in=0:slev=0.65:mlev=1.04:phase=0,pan=stereo|c0=1.06*c0+0.08*c1|c1=0.08*c0+1.06*c1,equalizer=f=120:t=q:w=1.4:g=1.1,equalizer=f=3200:t=q:w=1.8:g=1.0,equalizer=f=6200:t=q:w=2.2:g=-1.4"
+
+# Limiter per-preset: applicato come ultimo stadio, dopo ITD/LFO.
+# level=0 evita il make-up automatico; latency=1 compensa il look-ahead.
+LIMITER_WHISPER="alimiter=limit=0.96:attack=2:release=40:level=0:latency=1"
+LIMITER_NEAR="alimiter=limit=0.97:attack=2.5:release=45:level=0:latency=1"
+LIMITER_CENTER="alimiter=limit=0.97:attack=3:release=50:level=0:latency=1"
 
 # ITD (Interaural Time Difference) — simula la differenza di arrivo tra orecchie
 # Sample-delay a 48 kHz: piu' robusto dei millisecondi frazionari.
@@ -232,20 +249,24 @@ LFO_PART="tremolo=f=0.12:d=0.06,flanger=delay=2:depth=1.5:regen=0:width=40:speed
 # CICLO ELABORAZIONE
 # ────────────────────────────────────────────────────────────────────────────────
 OVERWRITE_ALL=false
+OK_COUNT=0
+ERR_COUNT=0
+SKIP_COUNT=0
 [[ "$FORCE_OVERWRITE" -eq 1 ]] && OVERWRITE_ALL=true
 
 for CUR_FILE in "$@"; do
-  [[ -f "$CUR_FILE" ]] || { warn "File '$CUR_FILE' non trovato. Salto."; continue; }
+  [[ -f "$CUR_FILE" ]] || { warn "File '$CUR_FILE' non trovato. Salto."; ((SKIP_COUNT+=1)); continue; }
 
   info "Elaborazione: $CUR_FILE"
 
   # ── Selezione stream score-based ─────────────────────────────────────────────
-  PROBE_RESULT=$(pick_best_stereo_stream "$CUR_FILE") || { warn "Nessuna traccia audio trovata. Salto."; continue; }
+  PROBE_RESULT=$(pick_best_stereo_stream "$CUR_FILE") || { warn "Nessuna traccia audio trovata. Salto."; ((SKIP_COUNT+=1)); continue; }
 
   IFS='|' read -r A_STREAM_INDEX A_CHANNELS A_LANG <<<"$PROBE_RESULT"
 
   if [[ "$A_CHANNELS" -ne 2 ]]; then
     warn "Stream selezionato non e' stereo (Canali: $A_CHANNELS). Salto."
+    ((SKIP_COUNT+=1))
     continue
   fi
 
@@ -253,28 +274,25 @@ for CUR_FILE in "$@"; do
 
   # ── Selezione preset ─────────────────────────────────────────────────────────
   case "$DISTANCE_MODE" in
-    whisper) F_BASE="$FILTER_WHISPER"; ITD="$ITD_WHISPER"; T="Whisper 20-30cm" ;;
-    near)    F_BASE="$FILTER_NEAR";    ITD="$ITD_NEAR";    T="Near 30-50cm" ;;
-    center)  F_BASE="$FILTER_CENTER";  ITD="$ITD_CENTER";  T="Center Front" ;;
+    whisper) F_BASE="$FILTER_WHISPER"; ITD="$ITD_WHISPER"; LIMITER="$LIMITER_WHISPER"; T="Whisper 20-30cm" ;;
+    near)    F_BASE="$FILTER_NEAR";    ITD="$ITD_NEAR";    LIMITER="$LIMITER_NEAR";    T="Near 30-50cm" ;;
+    center)  F_BASE="$FILTER_CENTER";  ITD="$ITD_CENTER";  LIMITER="$LIMITER_CENTER";  T="Center Front" ;;
   esac
 
   # Assembla catena filtri con stream target
   FINAL_F="[0:${A_STREAM_INDEX}]${F_BASE}"
   [[ -n "$ITD" ]] && FINAL_F="${FINAL_F},${ITD}"
   [[ "$USE_LFO" -eq 1 ]] && FINAL_F="${FINAL_F},${LFO_PART}"
-  FINAL_F="${FINAL_F}[aout]"
+  FINAL_F="${FINAL_F},${LIMITER}[aout]"
 
   # ── Output path ──────────────────────────────────────────────────────────────
   OUT_FILE="${CUR_FILE%.*}_INTIMATE_${DISTANCE_MODE^^}.mkv"
-  [[ -n "$OUTDIR" ]] && {
-    mkdir -p "$OUTDIR" 2>/dev/null || true
-    OUT_FILE="$OUTDIR/$(basename "$OUT_FILE")"
-  }
+  [[ -n "$OUTDIR" ]] && OUT_FILE="$OUTDIR/$(basename "$OUT_FILE")"
 
   # ── Gestione sovrascrittura (s/n/t) — allineata a aegis/upmix ─────────────
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
-      confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; continue; }
+      confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; ((SKIP_COUNT+=1)); continue; }
     else
       info "Sovrascrittura automatica di '$OUT_FILE'..."
     fi
@@ -312,7 +330,21 @@ for CUR_FILE in "$@"; do
   fi
 
   CMD+=( "$OUT_FILE" )
-  "${CMD[@]}" && ok "Creato: $OUT_FILE" || warn "Errore su: $CUR_FILE"
+  if "${CMD[@]}"; then
+    ok "Creato: $OUT_FILE"
+    ((OK_COUNT+=1))
+  else
+    warn "Errore su: $CUR_FILE"
+    ((ERR_COUNT+=1))
+  fi
 done
 
-ok "Elaborazione completata."
+if (( ERR_COUNT > 0 )); then
+  err "Elaborazione completata con errori: OK=$OK_COUNT, FALLITI=$ERR_COUNT, SALTATI=$SKIP_COUNT"
+  exit 1
+fi
+if (( OK_COUNT == 0 )); then
+  warn "Nessun file elaborato: SALTATI=$SKIP_COUNT"
+  exit 0
+fi
+ok "Elaborazione completata: OK=$OK_COUNT, FALLITI=0, SALTATI=$SKIP_COUNT"

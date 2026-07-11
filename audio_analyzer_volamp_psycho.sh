@@ -58,8 +58,8 @@ usage() {
   cat <<'USAGE'
 -----------------------------------------------------------------------------------------------------------
 UTILIZZO:
-  ./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate]
-  ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]
+  ./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate] [run]
+  ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> [run] <file1> [file2 ...]
 
 MODALITA' INPUT:
   file      : Analizza un singolo file multimediale.
@@ -74,17 +74,20 @@ PARAMETRI:
   keep    : no     (Default) Non conservare audio originale.
             si     Conserva audio originale nel file processato.
   bitrate : Default automatico: AC3  = 640k - EAC3 = 768k
+  run     : si     (Default) Genera o aggiorna run_processing.sh.
+            no     Esegue solo l'analisi senza creare/modificare il batch.
 
 METRICA:
   DELTA = I(SUR) - I(FC)
   Misura il rapporto fra surround e centrale. Richiede tracce 5.1.
 
 ESEMPI:
-  ./audio_analyzer_volamp_psycho.sh "film.mkv"                    # Singolo file, default eac3/no/768k
-  ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k       # Singolo file + run_processing.sh
-  ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k               # Cartella corrente + run_processing.sh
-  ./audio_analyzer_volamp_psycho.sh . eac3 si 768k                
-  ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
+  ./audio_analyzer_volamp_psycho.sh "film.mkv"                         # Default: genera run_processing.sh
+  ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k no         # Solo analisi, nessun batch
+  ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k si                 # Cartella corrente + batch
+  ./audio_analyzer_volamp_psycho.sh . eac3 si 768k no                  # Cartella corrente, solo analisi
+  ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k no "ep01.mkv" "ep02.mkv"
+  ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv"  
 -----------------------------------------------------------------------------------------------------------
 USAGE
   exit 1
@@ -92,31 +95,41 @@ USAGE
 
 # Senza argomenti o con -h/--help -> mostra usage
 [[ $# -eq 0 || "${1:-}" == "-h" || "${1:-}" == "--help" ]] && usage
-# Modalità multi-file: se il primo argomento è --files, attivo la modalità multi-file e raccolgo i parametri specifici per questa modalità. In questo modo, posso distinguere chiaramente tra i due modi di passare i file (singolo/cartella vs lista manuale) e gestire i parametri di conseguenza.
+# Modalità multi-file: se il primo argomento è --files, attivo la modalità multi-file e raccolgo i parametri specifici per questa modalità.
+# CREATE_RUN accetta si|no e resta "si" per compatibilità con le versioni precedenti.
 MULTI_FILES_MODE=false
 MULTI_FILES=()
-# Modalità --files: i primi 3 argomenti dopo --files sono codec, keep, bitrate. Il resto è lista file.
+CREATE_RUN="si"
+
+# Modalità --files: i primi 3 argomenti dopo --files sono codec, keep, bitrate.
+# Il token successivo è interpretato come run solo se vale esattamente si oppure no;
+# altrimenti viene trattato come primo filename, mantenendo la sintassi precedente.
 if [[ "${1:-}" == "--files" ]]; then
   MULTI_FILES_MODE=true
-  # Controllo minimo argomenti per --files: codec, keep, bitrate + almeno 1 file
   if (( $# < 5 )); then
-    err "Uso --files non valido. Sintassi: ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]"
+    err "Uso --files non valido. Sintassi: ./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> [run] <file1> [file2 ...]"
     usage
   fi
-  # Resto argomenti: codec, keep, bitrate + lista file
+
   shift
   INPUT_ARG=""
   BATCH_CODEC="${1:-eac3}"
   BATCH_KEEP="${2:-no}"
   BATCH_BITRATE="${3:-}"
-  # Lista file a partire dal 4° argomento (indice 3 dopo shift)
   shift 3
+
+  if [[ "${1:-}" == "si" || "${1:-}" == "no" ]]; then
+    CREATE_RUN="$1"
+    shift
+  fi
+
   MULTI_FILES=("$@")
 else
   INPUT_ARG="${1:-}"
   BATCH_CODEC="${2:-eac3}"
   BATCH_KEEP="${3:-no}"
   BATCH_BITRATE="${4:-}"
+  CREATE_RUN="${5:-si}"
 fi
 # Valori di default
 [[ -z "$BATCH_BITRATE" ]] && {
@@ -126,15 +139,16 @@ fi
 # Validazione
 case "$BATCH_CODEC" in ac3|eac3) ;; *) err "Codec '$BATCH_CODEC' non valido. Usa ac3 o eac3."; usage ;; esac
 case "$BATCH_KEEP" in si|no) ;; *) err "Keep '$BATCH_KEEP' non valido. Usa si o no."; usage ;; esac
+case "$CREATE_RUN" in si|no) ;; *) err "Run '$CREATE_RUN' non valido. Usa si o no."; usage ;; esac
 [[ "$BATCH_BITRATE" =~ ^[0-9]+([kKmM])?$ ]] || { err "Bitrate '$BATCH_BITRATE' non valido. Es: 448k, 640k, 768k."; usage; }
 [[ "$BATCH_BITRATE" =~ [kKmM]$ ]] || BATCH_BITRATE="${BATCH_BITRATE}k"
 # Nota: non controllo se i file in --files esistono qui, lo faccio dopo per permettere di passare anche file parzialmente inesistenti senza bloccare tutto.
 if [[ "$MULTI_FILES_MODE" == true ]]; then
-  info "Metrica: DELTA | Input: lista manuale (${#MULTI_FILES[@]} file) | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=auto"
+  info "Metrica: DELTA | Input: lista manuale (${#MULTI_FILES[@]} file) | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=${CREATE_RUN}"
 else
-  info "Metrica: DELTA | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=auto"
+  info "Metrica: DELTA | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=${CREATE_RUN}"
 fi
-info "Volamp heuristic: make-up DSP 2.5 dB + recupero loudness con step 2.5 / 3 / 3.5 / 4 dB"
+info "Volamp heuristic: make-up DSP 4.0 dB + recupero loudness con step 4 / 4.5 / 5 / 5.5 dB"
 
 # ── CONFIG ANALITICA INTERNA ──────────────────────────────────────────────────
 # Target domestico fisso: niente variabili da esportare prima del lancio.
@@ -144,8 +158,8 @@ LOUDNESS_TARGET="-21.0"
 # Make-up gain minimo del processore.
 # Non rappresenta una sorgente "bassa": compensa la perdita percepita introdotta
 # da split/EQ/compressori/limiter della pipeline psicoacustica.
-VOLAMP_BASE="2.5"
-VOLAMP_MAX="4.0"
+VOLAMP_BASE="4.0"
+VOLAMP_MAX="5.5"
 
 # Se la media energetica dei surround e' sotto questa soglia, trattiamo il file
 # come falso 5.1 / front-heavy e forziamo un preset conservativo.
@@ -318,12 +332,12 @@ pick_best_stream() {
 # Controllo robusto: se il preset non è riconosciuto, restituisco un colore di default (bianco). Evita errori di visualizzazione e permette di gestire casi in cui il preset non è stato classificato correttamente.
 preset_color() {
   case "$1" in
-    SONAR) echo "\033[1;36m" ;;
-    AURA)  echo "\033[1;35m" ;;
-    WIDE)  echo "\033[1;32m" ;;
-    AEGIS) echo "\033[1;31m" ;;
-    VOICE) echo "\033[1;33m" ;;
-    *)     echo "\033[1;37m" ;;
+    SONAR) echo "\033[1;31m" ;;       # rosso
+    AEGIS) echo "\033[38;5;208m" ;;   # arancione (ANSI 256 colori)
+    WIDE)  echo "\033[1;32m" ;;       # verde
+    AURA)  echo "\033[1;35m" ;;       # viola/magenta
+    VOICE) echo "\033[1;33m" ;;       # giallo
+    *)     echo "\033[1;37m" ;;       # bianco
   esac
 }
 
@@ -341,14 +355,14 @@ classify_preset() {
       -v fcgate="$VOICE_FC_GATE" -v wgate="$WIDTH_WIDE_GATE" 'BEGIN {
     d += 0;
     preset="VOICE"; color="\033[1;33m";
-    if      (d < -13.0) { preset="SONAR"; color="\033[1;36m"; }
+    if      (d < -13.0) { preset="SONAR"; color="\033[1;31m"; }
     else if (d < -10.0) { preset="AURA";  color="\033[1;35m"; }
     else if (d <  -6.0) { preset="WIDE";  color="\033[1;32m"; }
-    else if (d <= -2.0) { preset="AEGIS"; color="\033[1;31m"; }
+    else if (d <= -2.0) { preset="AEGIS"; color="\033[38;5;208m"; }
     else {
       # Delta > -2: surround forti. Centro sano in assoluto -> buon mix (AEGIS),
       # altrimenti dialogo davvero coperto -> VOICE.
-      if (fc != "" && (fc+0) >= (fcgate+0)) { preset="AEGIS"; color="\033[1;31m"; }
+      if (fc != "" && (fc+0) >= (fcgate+0)) { preset="AEGIS"; color="\033[38;5;208m"; }
       else                                  { preset="VOICE"; color="\033[1;33m"; }
     }
     # Surround collassati/stretti: a parita di Delta una ricostruzione laterale
@@ -396,7 +410,7 @@ measure_stream_i_lra() {
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Euristica volamp da Loudness Integrata del file intero
-# Output consentiti automatici: 2.5 | 3 | 3.5 | 4
+# Output consentiti automatici: 4 | 4.5 | 5 | 5.5
 # ────────────────────────────────────────────────────────────────────────────────
 loudness_to_volamp() {
   local i_val="$1"
@@ -407,43 +421,43 @@ loudness_to_volamp() {
   local deficit
   deficit=$(awk -v i="$i_val" -v t="$LOUDNESS_TARGET" 'BEGIN { printf "%.2f", (t - i) }')
 
-  # V2.5: baseline leggermente piu' alta per compensare la perdita percepita
-  # della pipeline senza toccare voce/sub/surround.
-  # - 2.5 dB = make-up DSP standard
-  # - 3/3.5/4 = recupero crescente se la loudness integrata e' sotto target
+  # Baseline allineata al default del processore: +4 dB nominali.
+  # Gli step superiori recuperano sorgenti progressivamente piu' basse.
+  # - 4.0 dB = make-up DSP standard
+  # - 4.5/5.0/5.5 dB = recupero crescente sotto il target loudness
   if awk -v d="$deficit" 'BEGIN { exit !(d < 0.8) }'; then
     echo "$VOLAMP_BASE"
   elif awk -v d="$deficit" 'BEGIN { exit !(d < 1.8) }'; then
-    echo "3.0"
+    echo "4.5"
   elif awk -v d="$deficit" 'BEGIN { exit !(d < 3.0) }'; then
-    echo "3.5"
+    echo "5.0"
   else
     echo "$VOLAMP_MAX"
   fi
 }
 
-# Descrizione testuale del volamp consigliato, per display più umano e meno numerico. Allineata alla logica del processore: 0 = nessun boost, 1.5 = boost leggero, 2 = boost consigliato, 2.5 = boost massimo prudente.
+# Descrizione testuale del volamp consigliato per il display.
 volamp_to_desc() {
   case "$1" in
-    2.5)     echo "Make-up DSP standard plus" ;;
-    3|3.0)   echo "Recupero loudness" ;;
-    3.5)     echo "Recupero loudness forte" ;;
-    4|4.0)   echo "Recupero massimo" ;;
-    2|2.0)   echo "Make-up DSP legacy" ;;
+    4|4.0)   echo "Make-up DSP standard" ;;
+    4.5)     echo "Recupero loudness leggero" ;;
+    5|5.0)   echo "Recupero loudness" ;;
+    5.5)     echo "Recupero loudness forte" ;;
+    6|6.0)   echo "Recupero massimo manuale" ;;
     0|0.0)   echo "OFF manuale" ;;
     *)       echo "Boost custom" ;;
   esac
 }
 
-# Descrizione testuale del volamp consigliato, per display più umano e meno numerico. Allineata alla logica del processore: 0 = nessun boost, 1.5 = boost leggero, 2 = boost consigliato, 2.5 = boost massimo prudente.
+# Stato sintetico del livello della sorgente, derivato dal volamp consigliato.
 source_volume_status() {
   local volamp="$1"
   case "$volamp" in
-    2.5)     echo "standard / make-up DSP plus" ;;
-    3|3.0)   echo "basso" ;;
-    3.5)     echo "molto basso" ;;
-    4|4.0)   echo "estremamente basso" ;;
-    2|2.0)   echo "standard legacy" ;;
+    4|4.0)   echo "standard / make-up DSP" ;;
+    4.5)     echo "basso" ;;
+    5|5.0)   echo "molto basso" ;;
+    5.5)     echo "estremamente basso" ;;
+    6|6.0)   echo "modalita' manuale spinta" ;;
     0|0.0)   echo "OFF manuale" ;;
     *)       echo "da verificare" ;;
   esac
@@ -461,11 +475,11 @@ cap_volamp_by_lra() {
   local volamp="$1" lra="$2"
   [[ -n "$lra" && "$lra" =~ ^-?[0-9]+([.][0-9]+)?$ ]] || { echo "$volamp"; return; }
 
-  # Mix molto dinamico: permetto recupero, ma evito 4 dB automatici quando
-  # la LRA e' estrema. Non scende mai sotto VOLAMP_BASE.
+  # Mix molto dinamico: consento il recupero ma limito gli step piu' spinti.
+  # Il cap non scende mai sotto il make-up base di 4.0 dB.
   if awk -v l="$lra" 'BEGIN { exit !(l >= 18.0) }'; then
-    if awk -v v="$volamp" 'BEGIN { exit !(v > 3.5) }'; then
-      echo "3.5"
+    if awk -v v="$volamp" 'BEGIN { exit !(v > 4.5) }'; then
+      echo "4.5"
     else
       echo "$volamp"
     fi
@@ -755,64 +769,73 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   # ── Generazione batch file ─────────────────────────────────────────────────
   # Se ho risultati validi, genero un batch file con i comandi di processing consigliati per ogni file, usando i preset raffinati per-file se sono stati forzati o se la stagione è eterogenea, altrimenti usando il preset stagionale. Il batch file include commenti e istruzioni per l'utente, e ogni comando include un commento con le metriche rilevanti per quel file.
   BATCH_FILE="run_processing.sh"
-  {
-    echo '#!/usr/bin/env bash'
-    echo "# ── Batch generato da audio_analyzer_delta (V4.6 DELTA/VOLAMP/FILES/AUTORUN) ──"
-    echo "# Data: $(date '+%Y-%m-%d %H:%M')"
-    echo "# Metrica: DELTA (+ raffinamento width / I(FC)) | Percentile: P25 (audiofilo)"
-    echo '#'
-    echo '# Modifica le variabili sotto se necessario, poi lancia:'
-    echo "#   ./${BATCH_FILE}"
-    echo '#'
-    echo ''
-    echo '# ── CONFIGURAZIONE (modifica qui) ──'
-    echo "CODEC=\"${BATCH_CODEC}\"        # ac3 | eac3"
-    echo "KEEP=\"${BATCH_KEEP}\"           # si | no"
-    echo "BITRATE=\"${BATCH_BITRATE}\"      # es. 448k, 640k, 768k"
-    echo 'PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"'
-    echo ''
-    echo '# ── COMANDI ──'
-    echo "# Nota: l'ultimo parametro numerico e' il volamp consigliato per-file."
-
-    # Per ogni file, genero un comando di processing usando il preset raffinato per-file se è stato forzato o se la stagione è eterogenea, altrimenti usando il preset stagionale. Escludo i file che hanno già preset AC3 dedicati, perché non hanno senso da processare con questo script di upmix/boost.
-    for (( i=0; i<CNT; i++ )); do
-      case "${GLOBAL_METRIC_PATHS[$i]}" in
-        *_AC3_Aegis.mkv|*_AC3_Sonar.mkv|*_AC3_Wide.mkv|*_AC3_Aura.mkv|*_AC3_Voice.mkv|\
-        *_EAC3_Aegis.mkv|*_EAC3_Sonar.mkv|*_EAC3_Wide.mkv|*_EAC3_Aura.mkv|*_EAC3_Voice.mkv)
-          continue
-          ;;
-      esac
-      # Determino il preset da usare per il comando di processing: se è stato forzato o se la stagione è eterogenea, uso il preset raffinato per-file già calcolato in scan_delta (che include la disambiguazione width / I(FC)), altrimenti uso il preset stagionale.
-      file_preset=""
-      if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" || "$HIGH_SPREAD" -eq 1 ]]; then
-        # Forzato (fake 5.1) o stagione eterogenea: uso il preset raffinato per-file
-        # gia' calcolato in scan_delta (include disambiguazione width / I(FC)).
-        file_preset="${GLOBAL_PRESET_VALUES[$i]}"
-      else
-        file_preset="$season_preset"
-      fi
-      # Se per qualche motivo il preset per-file è vuoto, uso il preset stagionale come fallback, per garantire che ogni file abbia un preset assegnato nel batch.
-      [[ -z "$file_preset" ]] && file_preset="${season_preset:-SONAR}"
-      file_preset_lower="${file_preset,,}"
-      file_volamp="${GLOBAL_VOLAMP_VALUES[$i]:-0}"
-      file_loudness="${GLOBAL_LOUDNESS_VALUES[$i]:-N/A}"
-      file_width="${GLOBAL_WIDTH_VALUES[$i]:-N/A}"
-      file_lra="${GLOBAL_LRA_VALUES[$i]:-N/A}"
-      escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
-
-      # Genero il comando di processing per il file, usando il preset determinato e includendo un commento con le metriche rilevanti (Delta, I(FC), LRA, Width MS, volamp consigliato). Il comando è formattato in modo che i parametri siano chiari e facilmente modificabili se necessario.
-      printf '"$PROC" "$CODEC" "$KEEP" %s "$BITRATE" %s %s  # DELTA %s dB | I=%s LUFS | LRA=%s LU | WidthMS=%s dB | volamp=%s dB\n' \
-        "$escaped_path" "$file_preset_lower" "$file_volamp" "${GLOBAL_METRIC_VALUES[$i]}" "$file_loudness" "$file_lra" "$file_width" "$file_volamp"
-    done
-
-    echo ''
-    echo 'echo "Batch completato."'
-  } > "$BATCH_FILE"
-  # Rendo eseguibile il batch file generato e mostro un messaggio di conferma. Se per qualche motivo il batch file non è stato generato correttamente, esco con warning e codice di errore.
-  chmod +x "$BATCH_FILE"
-  ok "Batch file generato: ${BATCH_FILE}"
+  if [[ "$CREATE_RUN" == "si" ]]; then
+    {
+      echo '#!/usr/bin/env bash'
+      echo "# ── Batch generato da audio_analyzer_delta (V4.8 BASE4/DELTA/VOLAMP/FILES/RUNSELECT) ──"
+      echo "# Data: $(date '+%Y-%m-%d %H:%M')"
+      echo "# Metrica: DELTA (+ raffinamento width / I(FC)) | Percentile: P25 (audiofilo)"
+      echo '#'
+      echo '# Modifica le variabili sotto se necessario, poi lancia:'
+      echo "#   ./${BATCH_FILE}"
+      echo '#'
+      echo ''
+      echo '# ── CONFIGURAZIONE (modifica qui) ──'
+      echo "CODEC=\"${BATCH_CODEC}\"        # ac3 | eac3"
+      echo "KEEP=\"${BATCH_KEEP}\"           # si | no"
+      echo "BITRATE=\"${BATCH_BITRATE}\"      # es. 448k, 640k, 768k"
+      echo 'PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"'
+      echo ''
+      echo '# ── COMANDI ──'
+      echo "# Nota: l'ultimo parametro numerico e' il volamp consigliato per-file."
+  
+      # Per ogni file, genero un comando di processing usando il preset raffinato per-file se è stato forzato o se la stagione è eterogenea, altrimenti usando il preset stagionale. Escludo i file che hanno già preset AC3 dedicati, perché non hanno senso da processare con questo script di upmix/boost.
+      for (( i=0; i<CNT; i++ )); do
+        case "${GLOBAL_METRIC_PATHS[$i]}" in
+          *_AC3_Aegis.mkv|*_AC3_Sonar.mkv|*_AC3_Wide.mkv|*_AC3_Aura.mkv|*_AC3_Voice.mkv|\
+          *_EAC3_Aegis.mkv|*_EAC3_Sonar.mkv|*_EAC3_Wide.mkv|*_EAC3_Aura.mkv|*_EAC3_Voice.mkv)
+            continue
+            ;;
+        esac
+        # Determino il preset da usare per il comando di processing: se è stato forzato o se la stagione è eterogenea, uso il preset raffinato per-file già calcolato in scan_delta (che include la disambiguazione width / I(FC)), altrimenti uso il preset stagionale.
+        file_preset=""
+        if [[ "${GLOBAL_PRESET_FORCED_VALUES[$i]:-0}" == "1" || "$HIGH_SPREAD" -eq 1 ]]; then
+          # Forzato (fake 5.1) o stagione eterogenea: uso il preset raffinato per-file
+          # gia' calcolato in scan_delta (include disambiguazione width / I(FC)).
+          file_preset="${GLOBAL_PRESET_VALUES[$i]}"
+        else
+          file_preset="$season_preset"
+        fi
+        # Se per qualche motivo il preset per-file è vuoto, uso il preset stagionale come fallback, per garantire che ogni file abbia un preset assegnato nel batch.
+        [[ -z "$file_preset" ]] && file_preset="${season_preset:-SONAR}"
+        file_preset_lower="${file_preset,,}"
+        file_volamp="${GLOBAL_VOLAMP_VALUES[$i]:-0}"
+        file_loudness="${GLOBAL_LOUDNESS_VALUES[$i]:-N/A}"
+        file_width="${GLOBAL_WIDTH_VALUES[$i]:-N/A}"
+        file_lra="${GLOBAL_LRA_VALUES[$i]:-N/A}"
+        escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
+  
+        # Genero il comando di processing per il file, usando il preset determinato e includendo un commento con le metriche rilevanti (Delta, I(FC), LRA, Width MS, volamp consigliato). Il comando è formattato in modo che i parametri siano chiari e facilmente modificabili se necessario.
+        printf '"$PROC" "$CODEC" "$KEEP" %s "$BITRATE" %s %s  # DELTA %s dB | I=%s LUFS | LRA=%s LU | WidthMS=%s dB | volamp=%s dB\n' \
+          "$escaped_path" "$file_preset_lower" "$file_volamp" "${GLOBAL_METRIC_VALUES[$i]}" "$file_loudness" "$file_lra" "$file_width" "$file_volamp"
+      done
+  
+      echo ''
+      echo 'echo "Batch completato."'
+    } > "$BATCH_FILE"
+    # Rendo eseguibile il batch file generato e mostro un messaggio di conferma. Se per qualche motivo il batch file non è stato generato correttamente, esco con warning e codice di errore.
+    chmod +x "$BATCH_FILE"
+    ok "Batch file generato: ${BATCH_FILE}"
+  else
+    info "Generazione run_processing.sh disattivata (run=no)."
+    info "Un eventuale run_processing.sh esistente non viene modificato o rimosso."
+  fi
 else
-  warn "Nessun risultato Delta valido: run_processing.sh non generato."
+  if [[ "$CREATE_RUN" == "si" ]]; then
+    warn "Nessun risultato Delta valido: run_processing.sh non generato."
+  else
+    warn "Nessun risultato Delta valido."
+  fi
 fi
 
 echo -e ""

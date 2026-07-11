@@ -2,34 +2,31 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Psychoacoustic Suite - FFmpeg Toolkit - Luglio 2026
+# 🎧 Psychoacoustic Suite — FFmpeg Toolkit — Luglio 2026
 
-Suite di script **Bash + FFmpeg** per analizzare, correggere e trasformare tracce audio stereo, 5.1 e Atmos/EAC3 in modo offline, ripetibile e controllato.
+Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e trasformare tracce audio stereo, 5.1 ed EAC3 Atmos/JOC in modo offline, ripetibile e controllato.
 
 > Non tutti i supereroi indossano un mantello. Alcuni lanciano `ffmpeg` e salvano i dialoghi dal multiverso del mix sbagliato.
 
-L'idea è semplice: **misurare il mix, capire dov'è sbilanciato e applicare solo il processing necessario**. Niente DSP opaco, niente pulsanti “enhance” usciti da un film poliziesco del 2003. Solo FFmpeg, euristiche dichiarate e preset psicoacustici ragionati.
+La filosofia è semplice: **misurare prima, processare dopo**. L'analyzer stima il rapporto fra centrale e surround, sceglie il preset più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
 
-La suite è tarata per setup domestico a livello medio con diffusori compatti, subwoofer attivo, crossover intorno a **110 Hz**, ascolto a volume medio/basso e priorità all'intelligibilità della voce italiana. *(Testato su: AVR Yamaha RX-V4A, kit 5.1 JBL SCS200, subwoofer attivo Kenwood)*
+La taratura 5.1 è pensata per un impianto domestico con diffusori compatti, subwoofer attivo, crossover AVR intorno a **110 Hz**, ascolto medio/basso e priorità all'intelligibilità della voce italiana. Setup di riferimento: **Yamaha RX-V4A, JBL SCS200, subwoofer Kenwood SW-40HT**.
 
-### Schema di riferimento
-
-La taratura è stata pensata sul seguente layout domestico 5.1: punto d'ascolto centrale, frontali a circa **3,6 m**, centrale sotto TV a circa **140 cm**, surround laterali/posteriori e subwoofer front-left/side-left.
+## Schema di riferimento
 
 <p align="left">
   <img src="sonar_room_layout.png" width="700" alt="Schema layout stanza 5.1 Sonary Suite">
 </p>
 
-Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione a:
+Obiettivi principali:
 
 - dialoghi intelligibili senza effetto megafono;
 - surround presenti ma non invadenti;
-- protezione dei piccoli satelliti tramite passa-alto morbidi;
-- basso gestito principalmente dall'AVR/sub, senza gonfiare LFE inutilmente;
-- make-up gain finale coerente tramite `volamp`, allineato fra analyzer e processore; baseline automatica v2.5 a `2.5 dB`;
-- batch ripetibili su film, episodi e cartelle intere.
-
-> Non tutti i supereroi indossano un mantello. Alcuni utilizzano `filter_complex`.
+- basso controllato, con gestione principale demandata ad AVR e subwoofer;
+- processing selettivo: SONAR non viene applicato indiscriminatamente;
+- make-up gain finale coerente fra analyzer e processore;
+- batch ripetibili su film, episodi e cartelle intere;
+- conservazione separata del percorso Atmos originale quando richiesta.
 
 ---
 
@@ -37,18 +34,31 @@ Pensata per AVR usati in modalità **Straight / Pure / Direct**, con attenzione 
 
 ### Software
 
-- **FFmpeg 7+** consigliato (con **libsoxr** opzionale per qualità superiore nel resampling)
-- **ffprobe**
-- **Bash 4.x+**
-- **awk** per l'analyzer
+- **FFmpeg 7+** consigliato;
+- **ffprobe**;
+- **Bash 4.x+**;
+- **awk** per l'analyzer;
+- build FFmpeg con **libsoxr** per `aegis_sonar...` e `stereo251_upmix...`;
+- build FFmpeg con **libbs2b** per `asmr_vr_intimate...`.
+
+Gli script che impostano esplicitamente `resampler=soxr` non effettuano un fallback automatico: se il build FFmpeg non include libsoxr, il filtergraph fallisce. Lo script ASMR verifica invece `bs2b` all'avvio e termina con un errore esplicito se il filtro non è disponibile.
+
+Verifiche utili:
+
+```bash
+ffmpeg -version
+ffprobe -version
+ffmpeg -hide_banner -filters 2>/dev/null | grep -w bs2b
+ffmpeg -hide_banner -h filter=aresample 2>&1 | grep -i soxr
+```
 
 ### Sistemi operativi
 
-- Linux
-- macOS
-- Windows tramite **MSYS2**, **Git Bash** o **WSL2**
+- Linux;
+- macOS;
+- Windows tramite MSYS2, Git Bash o WSL2.
 
-> Nota pratica: AC3/EAC3 vengono codificati via CPU. L'accelerazione hardware, quando c'è, riguarda quasi sempre il video. Sì, dobbiamo ancora dirlo.
+AC3/EAC3 vengono codificati via CPU. L'accelerazione hardware, quando disponibile, riguarda normalmente il video, che in questa suite viene copiato senza ricodifica.
 
 ---
 
@@ -60,13 +70,12 @@ cd Sonary_Suite
 chmod +x *.sh
 ```
 
-Verifica base:
+Controllo sintattico rapido:
 
 ```bash
-ffmpeg -version
-ffprobe -version
-bash --version
-awk --version 2>/dev/null || awk -W version
+for f in *.sh; do
+  bash -n "$f" || exit 1
+done
 ```
 
 ---
@@ -75,35 +84,44 @@ awk --version 2>/dev/null || awk -W version
 
 | Script | Scopo |
 |---|---|
-| `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, target domestico `-21 LUFS`, fake-5.1 gate, volamp automatico **2.5-4.0 dB** e generazione automatica di `run_processing.sh` |
-| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset psicoacustici, diffusori compatti crossover 110 Hz, voce italiana body-safe, master limiter a 192 kHz |
-| `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 con due preset: `to51` e `quad` |
-| `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie, ASMR, VR e sorgenti intime |
-| `atmos_to_51_dynaudnorm_psicho.sh` | Conversione EAC3 Atmos/JOC → EAC3 5.1 DynNorm con high-pass subsonico + traccia Atmos originale preservata |
+| `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e creazione opzionale di `run_processing.sh` |
+| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset `aegis`, `sonar`, `wide`, `aura`, `voice`, EQ voce, surround psicoacustici e controllo LFE |
+| `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 con preset `to51` e `quad`, validazione bitrate e limiter true-peak |
+| `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie/ASMR/VR con BS2B, ITD, loudnorm, LFO opzionale e limiter finale |
+| `atmos_to_51_dynaudnorm_psicho.sh` | Prepara un MKV con EAC3 5.1 normalizzata come primaria e traccia Atmos/EAC3 originale copiata come secondaria |
 
-> Nota naming: il file Atmos attuale si chiama `psicho` e non `psycho`. Il README usa il nome reale del file, perché Bash non perdona i refusi e non ha mai avuto senso dell'umorismo.
+> Nota naming: il file Atmos mantiene il nome storico `psicho`. Il README usa il nome reale del file.
 
 ---
 
-## 🚀 Quick Start (TL;DR)
+## Quick Start
 
-Hai una cartella piena di episodi 5.1 (es. `ac3` o `eac3`) e non vuoi leggere il manuale? 
+Analisi di una cartella 5.1 e generazione del batch:
 
 ```bash
-# 1. Analizza la cartella e genera il batch consigliato
-./audio_analyzer_volamp_psycho.sh . eac3 no 768k
-
-# 2. Lancia il processing generato
+./audio_analyzer_volamp_psycho.sh . eac3 no 768k si
 ./run_processing.sh
 ```
-Fatto. I tuoi file suoneranno meglio sui dialoghi e saranno bilanciati per il tuo salotto.
-Vuoi sapere cosa è successo sotto il cofano? Continua a leggere.
+
+La sintassi precedente resta valida perché `run` ha default `si`:
+
+```bash
+./audio_analyzer_volamp_psycho.sh . eac3 no 768k
+```
+
+Per eseguire solo l'analisi senza creare o modificare `run_processing.sh`:
+
+```bash
+./audio_analyzer_volamp_psycho.sh . eac3 no 768k no
+```
 
 ---
 
-## 1) `audio_analyzer_volamp_psycho.sh`
+# 1. `audio_analyzer_volamp_psycho.sh`
 
-Analyzer principale per tracce **5.1**. La metrica unica è **DELTA**:
+Analyzer per tracce **5.1**. Non modifica i file audio.
+
+La metrica principale è:
 
 ```text
 Delta = I(SUR) - I(FC)
@@ -113,75 +131,71 @@ Dove:
 
 - `I(FC)` è la loudness integrata del centrale;
 - `I(SUR)` è la media energetica dei surround SL/SR oppure BL/BR;
-- valori più negativi indicano surround più arretrati rispetto al parlato.
+- valori più negativi indicano surround più arretrati rispetto al centrale.
 
-### Caratteristiche principali
+## Caratteristiche
 
-- selezione traccia 5.1 score-based: 6 canali, default, lingua italiana;
+- selezione stream score-based: priorità a 6 canali, traccia default e lingua italiana;
 - misura `I(FC)`, `I(SL)`, `I(SR)`, `I(SUR)`, `Delta`, `I(full)`, `LRA` e `Width MS`;
-- target loudness interno fisso: **`-21.0 LUFS`**, pensato per ascolto domestico;
-- fake-5.1 gate: se `I(SUR) < -60 LUFS`, forza preset `voice` per evitare SONAR su rumore/dither;
-- usa `Delta` per scegliere il preset;
-- usa la loudness integrata per stimare `volamp` come **make-up gain finale del DSP**;
-- usa una base automatica v2.5 di **2.5 dB**, con salita progressiva fino a **4.0 dB** quando il file è realmente basso;
-- usa la LRA solo come protezione per limitare `volamp` quando il mix è basso ma molto dinamico;
-- usa P25 come verdetto stagionale, con bias verso episodi con surround più deboli;
-- se lo spread supera 4 dB, genera preset per-file;
-- salva il preset effettivo per-file, inclusi quelli forzati dal fake-5.1 gate;
-- genera sempre `run_processing.sh` quando trova almeno un risultato valido.
+- target loudness interno: **`-21.0 LUFS`**;
+- fake-5.1 gate: se `I(SUR) < -60 LUFS`, forza `voice`;
+- disambiguazione `voice/aegis` tramite loudness assoluta del centrale;
+- raffinamento verso `wide` quando i surround risultano stretti o collassati;
+- verdetto stagionale basato sul **P25** del Delta;
+- warning per stagione eterogenea quando lo spread supera `4 dB`;
+- volamp automatico con base **4.0 dB** e massimo **5.5 dB**;
+- cap del volamp a **4.5 dB** quando `LRA >= 18 LU`;
+- `run_processing.sh` opzionale tramite parametro `run=si|no`;
+- colori distinti in console:
+  - SONAR rosso;
+  - AEGIS arancione;
+  - WIDE verde;
+  - AURA viola/magenta;
+  - VOICE giallo.
 
-Niente variabili da esportare prima del lancio: il target domestico `-21.0` è dentro lo script. Meno rituali da shell, più lavoro utile.
-
-### Sintassi
+## Sintassi
 
 ```bash
-./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate]
-./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> <file1> [file2 ...]
+./audio_analyzer_volamp_psycho.sh <file|directory|""> [codec] [keep] [bitrate] [run]
+./audio_analyzer_volamp_psycho.sh --files <codec> <keep> <bitrate> [run] <file1> [file2 ...]
 ```
 
-### Parametri
+## Parametri
 
 | Parametro | Valori | Default | Note |
 |---|---|---:|---|
-| `file|directory|""` | file, directory o stringa vuota | obbligatorio | `""` analizza la cartella corrente |
-| `codec` | `eac3`, `ac3` | `eac3` | codec usato nel batch generato |
-| `keep` | `si`, `no` | `no` | mantiene o meno la traccia originale nel processing finale |
-| `bitrate` | es. `448k`, `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza `k` |
+| `file|directory|""` | file, directory o stringa vuota | obbligatorio | `""` usa la cartella corrente |
+| `codec` | `eac3`, `ac3` | `eac3` | codec scritto nel batch |
+| `keep` | `si`, `no` | `no` | indica al processore se conservare la traccia sorgente selezionata |
+| `bitrate` | es. `448k`, `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche il numero senza suffisso |
+| `run` | `si`, `no` | `si` | crea/aggiorna oppure non tocca `run_processing.sh` |
 
-### Esempi
+Con `run=no`, un eventuale `run_processing.sh` già esistente **non viene sovrascritto né cancellato**.
 
-```bash
-./audio_analyzer_volamp_psycho.sh "film.mkv"                    # singolo file, default eac3/no/768k
-./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k
-./audio_analyzer_volamp_psycho.sh "" eac3 no 448k
-./audio_analyzer_volamp_psycho.sh . eac3 si 768k
-./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv" "ep03.mkv"
-```
+Nella modalità `--files`, il token dopo il bitrate viene interpretato come `run` solo se è esattamente `si` o `no`; altrimenti è trattato come primo filename, mantenendo la compatibilità con la sintassi precedente.
 
-### Width MS
-
-`Width MS = I(SIDE) - I(MID)` sui surround.
-
-| Width MS | Diagnosi |
-|---:|---|
-| `< -12 dB` | collassato |
-| `-12 / -7 dB` | stretto |
-| `-7 / -3 dB` | medio |
-| `> -3 dB` | largo |
-
-È usato come raffinamento euristico: se i surround risultano stretti/collassati può spostare la scelta verso `wide` nei casi in cui ha più senso ricostruire lateralità. HAL non guida la nave da solo, ma ogni tanto suggerisce la rotta.
-
-### `run_processing.sh`
-
-Il batch generato contiene comandi di questo tipo:
+## Esempi
 
 ```bash
-"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 2.5
+# Singolo file, default eac3/no/768k, batch abilitato
+./audio_analyzer_volamp_psycho.sh "film.mkv"
+
+# Solo analisi
+./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k no
+
+# Cartella corrente + batch
+./audio_analyzer_volamp_psycho.sh "" eac3 no 768k si
+
+# Lista esplicita, nessun batch
+./audio_analyzer_volamp_psycho.sh --files eac3 si 768k no \
+  "ep01.mkv" "ep02.mkv" "ep03.mkv"
+
+# Sintassi compatibile: run=si implicito
+./audio_analyzer_volamp_psycho.sh --files eac3 si 768k \
+  "ep01.mkv" "ep02.mkv"
 ```
 
-Il valore finale numerico è il `volamp` consigliato per-file. Se `run_processing.sh` passa quel numero, il valore scritto nel batch prevale sul default interno del processore.
-
-### Mappa Delta → preset
+## Mappa Delta → preset
 
 | Delta | Preset | Interpretazione |
 |---:|---|---|
@@ -189,109 +203,163 @@ Il valore finale numerico è il `volamp` consigliato per-file. Se `run_processin
 | `-13 / -10 dB` | `aura` | surround deboli, allargamento prudente |
 | `-10 / -6 dB` | `wide` | surround medi, scena laterale |
 | `-6 / -2 dB` | `aegis` | surround buoni, controllo e bilanciamento |
-| `> -2 dB` | `voice` | surround forti o centrale coperto, priorità voce |
+| `> -2 dB` | `voice` oppure `aegis` | scelta raffinata tramite loudness assoluta del centrale |
 
-### Volamp
+La classificazione per-file considera anche `Width MS`. Se il preset preliminare è `aura` o `aegis` e `Width MS < -7 dB`, può essere sostituito con `wide`.
 
-`volamp` è il **make-up gain finale della pipeline DSP**, applicato dal processore **prima del master limiter**.
-Non è più pensato come piccolo boost opzionale: serve ad allineare il livello percepito del file processato a quello della sorgente, dopo EQ, compressione mirata del centrale, processing surround e controllo LFE.
+## Width MS
 
-L'analyzer lo stima usando la loudness integrata del file intero rispetto a un target domestico di **-21.0 LUFS**. La logica automatica v2.5 parte da **2.5 dB** e può salire fino a **4.0 dB** se il file è realmente basso.
+```text
+Width MS = I(SIDE) - I(MID)
+```
 
-Step automatici usati:
-
-| Volamp | Diagnosi pratica |
+| Width MS | Diagnosi |
 |---:|---|
-| `2.5 dB` | make-up DSP standard plus / volume sorgente OK o quasi OK |
-| `3.0 dB` | basso / recupero netto |
-| `3.5 dB` | molto basso / recupero forte |
-| `4.0 dB` | estremamente basso / recupero massimo |
+| `< -12 dB` | collassato |
+| `-12 / -7 dB` | stretto |
+| `-7 / -3 dB` | medio |
+| `>= -3 dB` | largo |
 
-Protezione LRA:
+## Volamp automatico
 
-| LRA | Cap automatico |
+Il volamp è il make-up gain applicato dal processore prima del master limiter. L'analyzer usa la loudness integrata del file rispetto al target `-21 LUFS`.
+
+| Deficit rispetto al target | Volamp |
 |---:|---:|
-| `>= 18 LU` | massimo `3.5 dB` |
+| `< 0.8 dB` | `4.0 dB` |
+| `0.8 / <1.8 dB` | `4.5 dB` |
+| `1.8 / <3.0 dB` | `5.0 dB` |
+| `>= 3.0 dB` | `5.5 dB` |
 
-Il processore accetta comunque `0 .. 6.0 dB` come valore manuale (default `3.0 dB`). `0` resta utile per debug/A-B test, ma non è il comportamento automatico consigliato. L'analyzer, invece, scrive nel batch solo valori automatici nell'intervallo **2.5 - 4.0 dB**.
+Protezione per mix molto dinamici:
 
-Nota pratica: sopra **4.5 dB** il processor mostra un warning perché il limiter può iniziare a lavorare in modo percepibile sui picchi; oltre `4.0 dB` è comunque una modalità spinta da validare in ascolto.
+| LRA | Cap |
+|---:|---:|
+| `>= 18 LU` | massimo `4.5 dB` |
+
+Il minimo automatico resta quindi **4.0 dB**. Il cap LRA non può scendere sotto questa base.
+
+## `run_processing.sh`
+
+Quando `run=si`, il batch contiene righe simili a:
+
+```bash
+"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 4.5  # DELTA -14.2 dB | I=-21.9 LUFS | LRA=11.0 LU | WidthMS=-4.1 dB | volamp=4.5 dB
+```
+
+L'ultimo parametro numerico è il volamp realmente passato al processore. Il batch usa:
+
+```bash
+PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"
+```
+
+Per una stagione omogenea usa normalmente il preset stagionale; con spread elevato o preset forzato usa il preset raffinato per-file.
 
 ---
 
-## 2) `aegis_sonar_wide_aura_voice_volamp_psycho.sh`
+# 2. `aegis_sonar_wide_aura_voice_volamp_psycho.sh`
 
 Motore principale per tracce **5.1 esistenti**.
 
-Fa processing su centrale e surround, mantenendo LFE coerente con il mix sorgente e lasciando all'AVR/sub il lavoro principale sulle basse. La taratura è ottimizzata per **diffusori compatti con AVR crossover globale a 110 Hz**. *(Baseline hardware: AVR Yamaha RX-V4A, kit JBL SCS200)*
+## Caratteristiche
 
-### Resampler di qualità (SOXR)
-
-Lo script utilizza il resampler **SOXR** (28 bit, cutoff=0.97) per il resampling finale a 192 kHz e 48 kHz, se disponibile in FFmpeg. Se FFmpeg non è compilato con libsoxr, cadrà automaticamente sul resampler fallback (qualità inferiore ma compatibile).
-
-**Verifica disponibilità:**
-```bash
-ffmpeg -hide_banner -h full 2>&1 | grep -i soxr
-```
-
-Se non trovi `soxr` nell'output:
-- **Linux/macOS**: Rebuilda FFmpeg con `./configure --enable-libsoxr ...`
-- **Windows**: Alcuni build pre-compilati includono già SOXR. Verifica il tuo.
-
-### Taratura generale per satelliti compatti
-
-- centrale `FC`: high-pass morbido a **40 Hz** + EQ voce dedicato;
-- frontali `FL/FR`: high-pass morbido a **40 Hz** + `FRONT_EQ`;
-- surround diretti `SL/SR`: high-pass morbido a **40 Hz** nei preset;
-- `LFE`: high-pass **32 Hz** + low-pass **110 Hz** + compressore picchi + limiter;
-- il crossover reale dei satelliti resta demandato all'AVR, consigliato intorno a **110 Hz**;
-- EQ voce italiana body-safe: lieve controllo del corpo, presenza mirata intorno a `1100/1650/2450/3800 Hz` e contenimento della brillantezza alta;
-- air layer psicoacustico a **12/15 ms**, filtrato 1600-9500 Hz;
-- `DECORR_GAIN` ridotti per non mascherare il centrale;
-- high shelf finale leggero a 12 kHz su canali non-LFE;
-- **FRONT_EQ**: EQ psicoacustico su frontali (−0.8 dB @ 320 Hz, +0.6 dB @ 5000 Hz, +0.7 dB shelf @ 11 kHz; default `g=0.7` sulla shelf per prudenza). Migliora articolazione su driver piccoli senza rubare al centro. È definito come variabile fissa nello script: per neutralizzarlo imposta `FRONT_EQ="anull"` direttamente nel file (non è sovrascrivibile da ambiente);
-- master limiter finale con `aresample=192000 -> alimiter -> aresample=48000`;
-- limiter finale aggiornato: `limit=0.985:attack=2.5:release=50:level=1:latency=1`;
-- limiter LFE separato e più prudente: `limit=0.94`, per controllare i picchi del sub senza farlo diventare invadente.
-
-### Caratteristiche
-
-- codec output `ac3` oppure `eac3`;
+- input 5.1, output AC3/EAC3 5.1(side);
 - preset `aegis`, `sonar`, `wide`, `aura`, `voice`;
-- `volamp` finale da `0` a `6.0 dB`, default `3.0 dB`, applicato prima del master limiter;
 - selezione stream score-based: 6 canali, default, lingua italiana;
 - layout gestiti: `5.1`, `5.1(back)`, `5.1(side)`;
-- keep opzionale della traccia audio originale;
-- video, sottotitoli, capitoli e allegati copiati quando presenti;
-- prompt di overwrite con scelta `s/n/t`.
+- EQ voce dedicato per ogni preset;
+- processing surround differenziato per preset;
+- air/decorrelation layer controllato;
+- trattamento LFE: high-pass `32 Hz`, low-pass `110 Hz`, limiter dedicato;
+- volamp manuale `0–6.0 dB`, default **4.0 dB**;
+- warning sopra `4.5 dB`;
+- video, sottotitoli, capitoli e allegati copiati;
+- keep opzionale della traccia 5.1 selezionata;
+- contatori finali ed exit code non zero se almeno un file fallisce.
 
-### Sintassi
+## Sintassi
 
 ```bash
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh <ac3|eac3> <si|no> [file] [bitrate] [preset] [volamp]
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh \
+  <ac3|eac3> <si|no> [file|""] [bitrate] [preset] [volamp]
 ```
 
-### Parametri
+Il parsing dei parametri opzionali è flessibile. L'ultimo valore numerico compreso fra `0` e `6.0` viene interpretato come volamp; un numero `>=32` può essere interpretato come bitrate senza suffisso.
+
+## Parametri
 
 | Parametro | Valori | Default | Note |
 |---|---|---:|---|
-| `codec` | `ac3`, `eac3` | obbligatorio | codec audio in uscita |
-| `keep` | `si`, `no` | obbligatorio | conserva la traccia originale come seconda traccia |
-| `file` | file singolo | cartella corrente | se omesso processa i file compatibili nella directory |
-| `bitrate` | es. `640k`, `768k` | `640k` AC3, `768k` EAC3 | accetta anche numeri senza suffisso |
-| `preset` | `aegis`, `sonar`, `wide`, `aura`, `voice` | `sonar` | modalità surround |
-| `volamp` | `0` - `6.0` | `3.0` | make-up gain finale in dB prima del master limiter; `0` = OFF/debug |
+| `codec` | `ac3`, `eac3` | obbligatorio | codec in uscita |
+| `keep` | `si`, `no` | obbligatorio | conserva la traccia sorgente selezionata |
+| `file` | file o stringa vuota | cartella corrente | batch se omesso/vuoto |
+| `bitrate` | step da `256k` a `768k` | `640k` AC3, `768k` EAC3 | per AC3 usare normalmente massimo `640k` |
+| `preset` | `aegis`, `sonar`, `wide`, `aura`, `voice` | `sonar` | modalità DSP |
+| `volamp` | `0–6.0` | `4.0` | gain finale prima del master limiter |
 
-### Esempi
+## Catena finale
+
+```text
+split 5.1
+→ EQ frontali / EQ centrale / processing surround / controllo LFE
+→ join 5.1(side)
+→ high-shelf finale
+→ volamp
+→ SOXR 192 kHz
+→ master limiter
+→ SOXR 48 kHz
+→ encoding AC3/EAC3
+```
+
+Parametri principali:
+
+```text
+FRONT_EQ:
+  -0.8 dB @ 320 Hz
+  +0.6 dB @ 5 kHz
+  +0.7 dB high-shelf @ 11 kHz
+
+LFE:
+  highpass 32 Hz
+  lowpass 110 Hz
+  alimiter limit=0.94, attack=2 ms, release=120 ms, level=0, latency=1
+
+Master:
+  high-shelf +0.4 dB @ 12 kHz sui canali non-LFE
+  SOXR 192 kHz / precision 28
+  alimiter limit=0.985, attack=2.5 ms, release=50 ms, level=1, latency=1
+  SOXR 48 kHz / precision 28 / cutoff 0.91
+```
+
+`level=1` nel limiter master abilita il comportamento di auto-level previsto dalla configurazione corrente. Il limiter LFE usa invece `level=0`.
+
+## Decorrelazione
+
+| Preset | `DECORR_GAIN` |
+|---|---:|
+| `sonar` | `0.055` |
+| `aura` | `0.048` |
+| `wide` | `0.042` |
+| `aegis` | `0.034` |
+| `voice` | `0` |
+
+## Esempi
 
 ```bash
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k sonar 2.5
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no "film.mkv" 768k wide 3.0
-./aegis_sonar_wide_aura_voice_volamp_psycho.sh ac3 si "film.mkv" 640k voice 2.5
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh \
+  eac3 no "film.mkv" 768k sonar 4.0
+
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh \
+  eac3 no "film.mkv" 768k wide 4.5
+
+./aegis_sonar_wide_aura_voice_volamp_psycho.sh \
+  ac3 si "film.mkv" 640k voice 4.0
+
+# Batch nella cartella corrente
 ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 no
 ```
 
-### Output
+## Output
 
 ```text
 <nome>_EAC3_Sonar.mkv
@@ -303,70 +371,81 @@ Se non trovi `soxr` nell'output:
 
 ---
 
-## 3) `stereo251_upmix_psycho.sh`
+# 3. `stereo251_upmix_psycho.sh`
 
-Upmix offline da **stereo 2.0 a 5.1**, con preset **TO51 / QUAD PSYCHO**.
+Upmix offline da **stereo 2.0 a 5.1**.
 
-Questo script taglia il menù da JRPG e tiene due sole lame:
+I preset disponibili sono:
 
-- `to51`: upmix 2.0 → 5.1 controllato, più cinematografico;
-- `quad`: quadrifonia ponderata in container 5.1, più naturale e meno invasiva.
+- `to51`: upmix controllato con side matrix L-R e rear bed;
+- `quad`: quadrifonia ponderata FL→SL e FR→SR, meno invasiva.
 
-FL/FR restano pieni, il phantom center originale non viene sabotato, il centrale diventa un assist filtrato a **102 Hz** e i rear sono filtrati per evitare il classico delitto acustico: attori che parlano dietro la testa.
+FL/FR restano pieni. Il centrale è un assist filtrato, non sostituisce il phantom center. Il LFE sintetico è volutamente basso perché il bass management resta compito dell'AVR.
 
-### Caratteristiche
-
-- input stereo 2 canali;
-- output AC3/EAC3 5.1(side);
-- preset `to51` e `quad`;
-- taratura per diffusori compatti + AVR crossover 110 Hz;
-- FC assist a 102 Hz;
-- LFE sintetico molto prudente;
-- psicoacustica leggera: delay Haas + allpass/air a basso livello;
-- limiter finale con upsample 192 kHz.
-
-### Sintassi
+## Sintassi
 
 ```bash
-./stereo251_upmix_psycho.sh <ac3|eac3> <si|no> [file|""] [bitrate] [to51|quad]
+./stereo251_upmix_psycho.sh \
+  <ac3|eac3> <si|no> [file|""] [bitrate] [to51|quad]
 ```
 
-### Parametri
+## Parametri
 
 | Parametro | Valori | Default | Note |
 |---|---|---:|---|
 | `codec` | `ac3`, `eac3` | obbligatorio | codec in uscita |
 | `keep` | `si`, `no` | obbligatorio | conserva la traccia stereo originale |
-| `file` | file o `""` | cartella corrente | se omesso o vuoto processa la directory corrente |
-| `bitrate` | es. `448k`, `640k`, `768k`, `512` | `448k` | normalizza `512` in `512k` |
-| `preset` | `to51`, `quad` | `to51` | modalità di upmix |
+| `file` | file o `""` | cartella corrente | batch se omesso/vuoto |
+| `bitrate` | step da `256k` a `640k` per AC3; fino a `768k` per EAC3 | `448k` | incrementi di `64k` |
+| `preset` | `to51`, `quad` | `to51` | tipo di upmix |
 
-### Preset
+Il parser accetta anche `448`, `448K` o valori con suffisso `M`, poi normalizza in kbps. Valori fuori range o non allineati agli step previsti vengono rifiutati prima dell'encoding.
 
-| Preset | Filosofia | Uso consigliato |
+## Preset
+
+| Preset | Filosofia | Uso indicativo |
 |---|---|---|
-| `to51` | side-matrix L-R + rear-bed psicoacustico leggero | film, serie, anime action, stereo largo |
-| `quad` | FL→SL e FR→SR con delay Haas, banda limitata e air layer minimo | concerti, TV stereo, anime/film vecchi, materiale mono-ish |
+| `to51` | side matrix L-R + rear bed psicoacustico | film, serie, anime, stereo largo |
+| `quad` | FL→SL e FR→SR con Haas delay e banda limitata | concerti, TV, materiale vecchio o mono-ish |
 
-### Dettaglio rapido preset
-
-`to51`:
+Valori principali:
 
 ```text
-FC_MIX=0.38, FC_VOL=0.84, FC_HP=102, LFE_VOL=0.10
-rear: side-matrix + rear-bed, HP 150/230 Hz
-output: file 5.1 con preset TO51
+TO51:
+  FC_MIX=0.38
+  FC_VOL=0.84
+  FC_HP=102 Hz
+  LFE_VOL=0.10
+  SUR_PAN=0.58
+  SUR_VOL=0.95
+  SUR_BED_VOL=0.16
+  delay side=18 ms
+  delay bed L/R=28/38 ms
+
+QUAD:
+  FC_MIX=0.28
+  FC_VOL=0.78
+  FC_HP=102 Hz
+  LFE_VOL=0.08
+  QUAD_VOL=0.58
+  delay L/R=16/19 ms
+  banda rear=250–8000 Hz
+  air layer=0.035
 ```
 
-`quad`:
+## Catena finale
 
 ```text
-FC_MIX=0.28, FC_VOL=0.78, FC_HP=102, LFE_VOL=0.08
-rear: FL->SL / FR->SR, delay 16/19 ms, banda 250-8000 Hz
-output: file 5.1 con preset QUAD
+upmix 5.1(side)
+→ SOXR 192 kHz / precision 28
+→ alimiter limit=0.97, attack=3 ms, release=60 ms, level=0, latency=1
+→ SOXR 48 kHz / precision 28 / cutoff 0.91
+→ AC3/EAC3 con dialnorm -31
 ```
 
-### Esempi
+La lingua viene propagata sia alla traccia processata sia, quando `keep=si`, alla traccia stereo originale. Lo script mantiene contatori `OK/FALLITI/SALTATI` e restituisce exit code `1` se almeno un encoding fallisce.
+
+## Esempi
 
 ```bash
 ./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k to51
@@ -375,324 +454,478 @@ output: file 5.1 con preset QUAD
 ./stereo251_upmix_psycho.sh eac3 no
 ```
 
-### Tuning via variabili ambiente
-
-I default sono già interni allo script. Le variabili restano sovrascrivibili per debug avanzato:
+## Tuning tramite ambiente
 
 ```bash
-FC_VOL=0.80 FC_MIX=0.34 ./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k to51
-QUAD_VOL=0.52 ./stereo251_upmix_psycho.sh eac3 no "concert.mkv" 448k quad
+FC_VOL=0.80 FC_MIX=0.34 \
+  ./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k to51
+
+QUAD_VOL=0.52 \
+  ./stereo251_upmix_psycho.sh eac3 no "concert.mkv" 448k quad
 ```
 
-Variabili utili:
+Variabili principali:
 
 | Variabile | Effetto |
 |---|---|
-| `FC_VOL` | volume del centrale assist |
-| `FC_MIX` | quantità di mid mono mandata al centrale |
-| `FC_HP` | high-pass del centrale |
-| `FC_LP` | low-pass del centrale |
-| `SUR_VOL` | volume componente side nel preset `to51` |
-| `SUR_BED_VOL` | volume rear-bed nel preset `to51` |
-| `SUR_DELAY` | ritardo side nel preset `to51` |
-| `QUAD_VOL` | volume rear nel preset `quad` |
-| `QUAD_DELAY_L/R` | delay rear nel preset `quad` |
+| `FRONT_VOL` | livello FL/FR |
+| `FC_VOL` | livello centrale assist |
+| `FC_MIX` | quantità mono inviata al centrale |
+| `FC_HP`, `FC_LP` | banda del centrale |
+| `SUR_PAN`, `SUR_VOL` | componente side del preset `to51` |
+| `SUR_BED_VOL`, `SUR_DELAY` | rear bed del preset `to51` |
+| `QUAD_VOL` | livello rear del preset `quad` |
+| `QUAD_DELAY_L/R` | delay rear |
+| `QUAD_HP`, `QUAD_LP` | banda rear |
 | `LFE_VOL` | quantità di LFE sintetico |
 
 ---
 
-## 4) `asmr_vr_intimate_psycho.sh`
+# 4. `asmr_vr_intimate_psycho.sh`
 
-Processing stereo per cuffie, ASMR, VR e contenuti ravvicinati.
+Processing stereo per cuffie, ASMR, VR e sorgenti ravvicinate.
 
-Integra:
+## Funzioni
 
+- selezione stream stereo score-based;
+- high-pass a due poli e low-pass differenziati per preset;
+- loudnorm con target per distanza;
 - crossfeed **BS2B J. Meier**;
-- ITD, Interaural Time Difference;
+- regolazione Mid/Side e crosstalk controllato;
+- ITD tramite delay in campioni;
 - EQ psicoacustico di prossimità;
-- loudnorm per target LUFS coerente con il preset;
-- LFO opzionale tipo “breathing”;
-- output `aac`, `opus` o `flac`;
-- keep opzionale della traccia originale.
+- LFO opzionale `tremolo + flanger`;
+- limiter finale posizionato **dopo ITD e LFO**;
+- codec `aac`, `opus` tramite `libopus`, oppure `flac`;
+- keep opzionale della traccia stereo originale;
+- contatori ed exit code reali.
 
-### Sintassi
+Lo script verifica `bs2b` prima di iniziare. Il filtro è obbligatorio per questo workflow.
+
+## Sintassi
 
 ```bash
 ./asmr_vr_intimate_psycho.sh [opzioni] <file1> [file2 ...]
 ```
 
-### Opzioni
+## Opzioni
 
 ```text
--o <dir>     Cartella output, default: stessa del file
+-o <dir>     directory di output
 -d <mode>    whisper | near | center
--k           Mantieni audio originale come seconda traccia
--l           Attiva Breathing LFO
+-k           conserva la traccia originale
+-l           abilita Breathing LFO
 -c <codec>   aac | opus | flac
--b <rate>    bitrate output, default 320k, ignorato con flac
--f           Forza overwrite senza chiedere
--h           Mostra help
+-b <rate>    bitrate, default 320k; ignorato con FLAC
+-f           forza overwrite
+-h           help
 ```
 
-### Preset
+La directory indicata con `-o` viene creata se non esiste; un errore di creazione interrompe lo script.
 
-| Preset | Target | Descrizione |
-|---|---:|---|
-| `whisper` | `-20 LUFS` | massima intimità, sussurri a 20-30 cm |
-| `near` | `-19 LUFS` | voce vicina ma non sussurrata, 30-50 cm |
-| `center` | `-18 LUFS` | sorgente frontale, spazializzazione leggera |
+## Preset
 
-### Esempi
+| Preset | Target | Distanza | Limiter finale |
+|---|---:|---:|---|
+| `whisper` | `-20 LUFS`, `TP=-2.0`, `LRA=13` | 20–30 cm | `limit=0.96`, attack `2`, release `40`, `level=0`, `latency=1` |
+| `near` | `-19 LUFS`, `TP=-1.8`, `LRA=12` | 30–50 cm | `limit=0.97`, attack `2.5`, release `45`, `level=0`, `latency=1` |
+| `center` | `-18 LUFS`, `TP=-1.5`, `LRA=11` | frontale | `limit=0.97`, attack `3`, release `50`, `level=0`, `latency=1` |
+
+Sequenza:
+
+```text
+band-pass
+→ loudnorm
+→ 48 kHz
+→ BS2B
+→ Mid/Side
+→ crosstalk
+→ EQ
+→ ITD
+→ LFO opzionale
+→ limiter finale
+```
+
+Nota: il processing è progettato per materiale stereo. Su una sorgente già binaurale, BS2B e crosstalk possono modificare gli indizi interaurali originali; verificare con confronto A/B.
+
+## Esempi
 
 ```bash
-./asmr_vr_intimate_psycho.sh -d whisper -c aac -b 320k "asmr.mkv"
-./asmr_vr_intimate_psycho.sh -d near -k -l -o output "clip01.mkv" "clip02.mkv"
-./asmr_vr_intimate_psycho.sh -d center -c flac "voce.wav"
+./asmr_vr_intimate_psycho.sh \
+  -d whisper -c aac -b 320k "asmr.mkv"
+
+./asmr_vr_intimate_psycho.sh \
+  -d near -k -l -o output "clip01.mkv" "clip02.mkv"
+
+./asmr_vr_intimate_psycho.sh \
+  -d center -c flac "voce.wav"
+```
+
+## Output
+
+```text
+<nome>_INTIMATE_WHISPER.mkv
+<nome>_INTIMATE_NEAR.mkv
+<nome>_INTIMATE_CENTER.mkv
 ```
 
 ---
 
-## 5) `atmos_to_51_dynaudnorm_psicho.sh`
+# 5. `atmos_to_51_dynaudnorm_psicho.sh`
 
-Prepara materiale **EAC3 Atmos/JOC** per il workflow 5.1.
+Pre-stadio per materiale **EAC3 Atmos/JOC**.
 
-Produce un MKV dual-track:
+Lo scopo non è sostituire Atmos, ma creare due percorsi nello stesso MKV:
 
-1. **EAC3 5.1 Normalized**, ottenuta decodificando il bed 5.1 e applicando un `highpass` subsonico a 20 Hz + `dynaudnorm` prudente;
-2. **EAC3 Atmos originale**, copiata bit-perfect.
+1. **EAC3 5.1 normalizzata**, primaria e `default`, destinata all'analyzer e agli script psicoacustici;
+2. **EAC3 Atmos/EAC3 originale**, copiata bit-perfect come seconda traccia non default.
 
-FFmpeg non renderizza gli oggetti Atmos come un AVR: lavora sul bed multicanale decodificabile. Questo script lo normalizza a `5.1(side)`, applica `dynaudnorm` con `coupling=1` e preserva la traccia Atmos originale. Prudenza e utilità nella stessa stanza: succede raramente, godiamocela.
+In termini tecnici FFmpeg decodifica il bed multicanale disponibile; non esegue il rendering degli oggetti Atmos come farebbe un AVR.
 
-### Sintassi
+## Workflow previsto
+
+```text
+EAC3 Atmos/JOC originale
+├─ decode bed/core multicanale
+│  → 5.1(side)
+│  → high-pass 20 Hz + dynaudnorm
+│  → EAC3 5.1 normalizzata, traccia 1/default
+└─ stream copy
+   → traccia originale, traccia 2/non-default
+```
+
+Da qui si può scegliere:
+
+```text
+A. Riproduzione Atmos originale:
+   selezionare la seconda traccia del file intermedio.
+
+B. Percorso psicoacustico:
+   usare la traccia EAC3 5.1 normalizzata come input di analyzer/aegis.
+```
+
+Lo script non tenta di reinserire automaticamente l'Atmos originale nei file prodotti da `aegis`; i due percorsi restano distinti.
+
+## Sintassi
 
 ```bash
 ./atmos_to_51_dynaudnorm_psicho.sh <file|directory|""> [bitrate]
 ```
 
-### Parametri
+## Parametri
 
 | Parametro | Valori | Default | Note |
 |---|---|---:|---|
 | `file|directory|""` | file, directory o stringa vuota | obbligatorio | `""` usa la cartella corrente |
-| `bitrate` | es. `640k`, `768k` | `640k` | bitrate della traccia EAC3 5.1 generata |
+| `bitrate` | `256k–768k` in step da `64k` | `640k` | bitrate della EAC3 5.1 normalizzata |
 
-### Dynaudnorm usato
+## Selezione della traccia
+
+Lo script:
+
+- considera solo stream EAC3 con almeno 6 canali;
+- cerca prima un'indicazione Atmos tramite profilo o `joc_complexity`;
+- preferisce traccia default e lingua italiana;
+- se Atmos non è rilevabile, usa il miglior EAC3 multicanale come fallback;
+- invia il warning di fallback su `stderr`, senza contaminare il valore restituito dalla funzione di probe.
+
+Se il fallback non è verificato come Atmos, il titolo della seconda traccia diventa:
 
 ```text
-highpass=f=20:t=q:w=0.707,dynaudnorm=framelen=500:gausssize=31:peak=0.92:maxgain=4:targetrms=0:compress=0:coupling=1:altboundary=0
+EAC3 Multichannel (Original - Atmos non verificato)
 ```
 
-Questa configurazione è conservativa:
+## Dynaudnorm
 
-- `highpass=20 Hz` rimuove subsoniche inutili prima della normalizzazione;
-- `peak=0.92` lascia headroom;
-- `maxgain=4` evita boost assurdi su silenzi e code;
-- `targetrms=0` disabilita il target RMS;
-- `compress=0` evita compressione aggiuntiva;
-- `coupling=1` preserva l'immagine surround applicando lo stesso gain ai canali.
-
-### Esempi
-
-```bash
-./atmos_to_51_dynaudnorm_psicho.sh "film.mkv"
-./atmos_to_51_dynaudnorm_psicho.sh "film.mkv" 768k
-./atmos_to_51_dynaudnorm_psicho.sh /path/to/folder
-./atmos_to_51_dynaudnorm_psicho.sh . 768k
-./atmos_to_51_dynaudnorm_psicho.sh "" 768k
+```text
+highpass=f=20:t=q:w=0.707,
+dynaudnorm=
+  framelen=500:
+  gausssize=31:
+  peak=0.92:
+  maxgain=4:
+  targetrms=0:
+  compress=0:
+  coupling=1:
+  altboundary=0
 ```
 
-### Output
+Interpretazione:
+
+- `highpass=20 Hz`: rimuove componente subsonica prima della normalizzazione;
+- `framelen=500`: finestra da 500 ms;
+- `gausssize=31`: smoothing ampio;
+- `peak=0.92`: target di picco con headroom;
+- `maxgain=4`: **fattore lineare massimo**, non `4 dB`; nominalmente equivale a circa `+12 dB` di ampiezza;
+- `targetrms=0`: target RMS disabilitato;
+- `compress=0`: compressione aggiuntiva disabilitata;
+- `coupling=1`: stesso fattore di gain sui canali, preservando il bilanciamento surround;
+- `altboundary=0`: modalità boundary standard.
+
+Non viene applicato un trattamento specifico al solo LFE. Il successivo script `aegis` gestisce high-pass `32 Hz`, low-pass `110 Hz` e limiter del canale `.1`.
+
+## Output
 
 ```text
 <nome>-0.mkv
 ```
 
-Con tracce:
+Con:
 
 ```text
 Traccia 1: EAC3 5.1 – Normalized
+           default, dialnorm -31
+
 Traccia 2: EAC3 Atmos (Original)
+           oppure EAC3 Multichannel (Original - Atmos non verificato)
+           stream copy, non default
+```
+
+Lingua e metadata principali vengono propagati. Lo script mantiene contatori `OK/FALLITI/SALTATI` e restituisce exit code `1` se almeno un file fallisce.
+
+## Esempi
+
+```bash
+./atmos_to_51_dynaudnorm_psicho.sh "film.mkv"
+./atmos_to_51_dynaudnorm_psicho.sh "film.mkv" 768k
+./atmos_to_51_dynaudnorm_psicho.sh /path/to/folder
+./atmos_to_51_dynaudnorm_psicho.sh "" 768k
 ```
 
 ---
 
-## Benchmark orientativo
+# Workflow consigliati
 
-Non è un benchmark scientifico. È una mappa pratica del costo relativo, così sai dove la CPU inizierà a contemplare il sindacato.
-
-| Script | Costo relativo | Note |
-|---|---:|---|
-| `audio_analyzer_volamp_psycho.sh` | Medio | misura più canali con EBU R128, quindi non è gratis |
-| `stereo251_upmix_psycho.sh` | Medio | upmix + filtri + encoding audio |
-| `asmr_vr_intimate_psycho.sh` | Medio | loudnorm, BS2B, EQ e limiter stereo |
-| `atmos_to_51_dynaudnorm_psicho.sh` | Medio/Alto | decode EAC3/Atmos bed + dynaudnorm + re-encode EAC3 |
-| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Alto | filtergraph 5.1 completo, cuore pesante della suite |
-
-Ordine indicativo dal più leggero al più pesante:
+## Sorgente 5.1 già utilizzabile
 
 ```text
-audio_analyzer_volamp_psycho
-stereo251_upmix_psycho
-asmr_vr_intimate_psycho
-atmos_to_51_dynaudnorm_psicho
-aegis_sonar_wide_aura_voice_volamp_psycho
+AC3/EAC3 5.1
+→ audio_analyzer_volamp_psycho.sh
+→ run_processing.sh
+→ aegis/sonar/wide/aura/voice
+```
+
+## Sorgente Atmos/JOC
+
+```text
+Atmos/JOC
+→ atmos_to_51_dynaudnorm_psicho.sh
+→ file dual-track:
+   - 5.1 normalizzata default
+   - Atmos originale secondaria
+→ analyzer
+→ processing psicoacustico opzionale
+```
+
+Il file dual-track resta il riferimento per la riproduzione Atmos non alterata. Il file psicoacustico è un'alternativa separata.
+
+## Sorgente stereo destinata al 5.1
+
+```text
+Stereo
+→ stereo251_upmix_psycho.sh
+→ EAC3/AC3 5.1
+→ opzionalmente analyzer
+→ opzionalmente aegis
+```
+
+Attenzione al gain staging: l'upmix genera già nuovi canali. Se l'output viene poi processato da Aegis, evitare boost manuali aggiuntivi non misurati.
+
+## Sorgente stereo per cuffie
+
+```text
+Stereo
+→ asmr_vr_intimate_psycho.sh
+→ AAC/Opus/FLAC stereo processato
 ```
 
 ---
 
-## Troubleshooting
+# Benchmark orientativo
 
-### Lo script non parte
+| Script | Costo relativo | Motivo principale |
+|---|---:|---|
+| `audio_analyzer_volamp_psycho.sh` | Medio/Alto | più passaggi EBU R128 su stream e canali separati |
+| `stereo251_upmix_psycho.sh` | Medio | upmix, filtri, SOXR e encoding |
+| `asmr_vr_intimate_psycho.sh` | Medio | loudnorm, BS2B, EQ, ITD/LFO e encoding |
+| `atmos_to_51_dynaudnorm_psicho.sh` | Medio/Alto | decode multicanale, dynaudnorm e re-encode EAC3 |
+| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Alto | filtergraph 5.1 completo e resampling SOXR |
+
+Il costo effettivo dipende da durata, codec sorgente, CPU, storage e build FFmpeg.
+
+---
+
+# Troubleshooting
+
+## Lo script non parte
 
 ```bash
 chmod +x *.sh
+bash -n nome_script.sh
 ffmpeg -version
 ffprobe -version
 ```
 
-Su Windows/MSYS2 verifica anche:
+Su Windows/MSYS2/Git Bash:
 
 ```bash
+which bash
 which ffmpeg
 which ffprobe
 which awk
 ```
 
-### `run_processing.sh` punta allo script sbagliato
+## `soxr` non disponibile
 
-Controlla questa riga dentro `run_processing.sh`:
+Sintomo tipico: errore nel filtro `aresample`.
+
+Verifica:
+
+```bash
+ffmpeg -hide_banner -h filter=aresample 2>&1 | grep -i soxr
+```
+
+Serve un build FFmpeg compilato con libsoxr.
+
+## `bs2b` non disponibile
+
+Lo script ASMR termina prima dell'encoding.
+
+```bash
+ffmpeg -hide_banner -filters 2>/dev/null | grep -w bs2b
+```
+
+Serve un build con libbs2b.
+
+## Non voglio creare `run_processing.sh`
+
+```bash
+./audio_analyzer_volamp_psycho.sh . eac3 no 768k no
+```
+
+Il file esistente resta intatto.
+
+## Voglio analizzare solo alcuni episodi
+
+```bash
+./audio_analyzer_volamp_psycho.sh --files eac3 no 768k si \
+  "ep01.mkv" "ep04.mkv" "ep08.mkv"
+```
+
+## `run_processing.sh` punta al processore sbagliato
+
+Controlla:
+
+```bash
+grep -n '^PROC=' run_processing.sh
+```
+
+Valore previsto:
 
 ```bash
 PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"
 ```
 
-Se serve, correggila manualmente.
-
-### Voglio analizzare solo alcuni episodi, non tutta la cartella
-
-```bash
-./audio_analyzer_volamp_psycho.sh --files eac3 no 768k "ep01.mkv" "ep04.mkv" "ep08.mkv"
-./run_processing.sh
-```
-
-### Il file è stereo, non 5.1
-
-Prima fai upmix:
+## Il file è stereo, non 5.1
 
 ```bash
 ./stereo251_upmix_psycho.sh eac3 no "film_stereo.mkv" 448k to51
 ```
 
-oppure, per quadrifonia ponderata:
+Oppure:
 
 ```bash
 ./stereo251_upmix_psycho.sh eac3 no "film_stereo.mkv" 448k quad
 ```
 
-### Il file è Atmos/EAC3
-
-Prima prepara il dual-track:
+## Il file è Atmos/EAC3
 
 ```bash
 ./atmos_to_51_dynaudnorm_psicho.sh "film_atmos.mkv" 768k
 ```
 
-Poi lavora sul core 5.1 generato.
+Il risultato contiene la 5.1 normalizzata come traccia default e l'originale come seconda traccia. Per Atmos non alterato selezionare la seconda; per il processing usare la prima.
 
-### Il centrale dell'upmix ruba scena
-
-Abbassa prima `FC_VOL` o `FC_MIX`, non i frontali:
-
-```bash
-FC_VOL=0.78 FC_MIX=0.34 ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
-```
-
-### I surround TO51 sono troppo timidi
-
-Aumenta leggermente `SUR_VOL` o `SUR_BED_VOL`:
-
-```bash
-SUR_VOL=1.02 SUR_BED_VOL=0.20 ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
-```
-
-### Il QUAD è troppo presente dietro
-
-Riduci `QUAD_VOL`:
-
-```bash
-QUAD_VOL=0.50 ./stereo251_upmix_psycho.sh eac3 no "concert.mkv" 448k quad
-```
-
-### L'analyzer forza VOICE su alcuni file
-
-Se vedi un warning tipo:
+## L'analyzer forza VOICE
 
 ```text
 Surround virtualmente muti: falso 5.1 / front-heavy. Forzo VOICE.
 ```
 
-non è un bug: lo script sta evitando di applicare preset aggressivi su canali surround praticamente muti.
+È una protezione: evita preset di ricostruzione aggressivi su canali surround quasi silenziosi.
 
-### Il file processato suona troppo basso
+## Il volamp sembra alto
 
-Controlla il valore scritto da `audio_analyzer_volamp_psycho.sh` nel batch:
-
-```bash
-grep -n 'volamp=' run_processing.sh
-```
-
-Il valore finale della riga è quello realmente passato al processore:
-
-```bash
-"$PROC" "$CODEC" "$KEEP" "film.mkv" "$BITRATE" sonar 3.0
-```
-
-Scala v2.5 consigliata:
+Il minimo automatico è ora `4.0 dB`, allineato al default del processore. I valori possibili sono:
 
 ```text
-2.5 = make-up standard plus
-3.0 = recupero netto
-3.5 = recupero forte
-4.0 = massimo, da ascoltare con attenzione
+4.0 = make-up DSP standard
+4.5 = sorgente bassa
+5.0 = sorgente molto bassa
+5.5 = sorgente estremamente bassa
 ```
 
-Se arrivi spesso a `4.0 dB`, il file è realmente basso oppure il processing sta togliendo troppo livello percepito: meglio verificare con un confronto A/B contro la traccia originale preservata.
+Sopra `4.5 dB` il processore mostra un warning perché il limiter può lavorare in modo più percepibile. Il gain nominale non coincide necessariamente con l'aumento LUFS finale: dipende da picchi, EQ e intervento del limiter.
 
-### Output già esistente
+## Il centrale dell'upmix ruba scena
 
-Gli script principali chiedono conferma:
+Ridurre prima `FC_VOL` o `FC_MIX`:
+
+```bash
+FC_VOL=0.78 FC_MIX=0.34 \
+  ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
+```
+
+## I surround TO51 sono troppo timidi
+
+```bash
+SUR_VOL=1.02 SUR_BED_VOL=0.20 \
+  ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
+```
+
+## Il QUAD è troppo presente dietro
+
+```bash
+QUAD_VOL=0.50 \
+  ./stereo251_upmix_psycho.sh eac3 no "concert.mkv" 448k quad
+```
+
+## Output già esistente
+
+Gli script principali usano:
 
 ```text
 [s/n/t]
 ```
 
-Dove:
+- `s`: sovrascrive il singolo file;
+- `n`: salta;
+- `t`: sovrascrive tutti i successivi.
 
-- `s` sovrascrive il singolo file;
-- `n` salta;
-- `t` sovrascrive tutti i successivi.
-
----
-
-## Cosa questi script NON fanno
-
-- non creano Atmos reale da materiale non Atmos;
-- non sostituiscono calibrazione AVR, distanza casse e livelli corretti;
-- non rifanno il mix cinematografico da zero;
-- non promettono miracoli su sorgenti massacrate;
-- non usano AI o DSP opachi;
-- non reinventano la fisica, anche se a volte FFmpeg ci prova.
+In sessione non interattiva, un output già esistente viene normalmente saltato.
 
 ---
 
-## Licenza
+# Cosa la suite non fa
+
+- non crea Atmos reale da materiale non Atmos;
+- non renderizza gli oggetti Atmos come un AVR;
+- non sostituisce calibrazione, distanze, livelli e bass management dell'AVR;
+- non ricostruisce informazioni assenti dalla sorgente;
+- non garantisce lo stesso risultato su casse, stanza e volume differenti;
+- non usa AI o DSP opachi;
+- non elimina la necessità di un confronto A/B.
+
+---
+
+# Licenza
 
 MIT License
 
 ---
 
-## Autore
+# Autore
 
 **Sandro (D@mocle77) Sabbioni**
 
-> Per riportare ordine nella Forza Sonora serve solo uno script Bash... questa è la via!
+> Per riportare ordine nella Forza Sonora serve solo uno script Bash. Questa è la via.

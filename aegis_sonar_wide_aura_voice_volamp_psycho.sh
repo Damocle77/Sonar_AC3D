@@ -11,9 +11,9 @@ set -uo pipefail
 # │   surround (Aegis, Sonar, Wide, Aura), con controllo mirato dei picchi LFE.      │
 # │                                                                                  │
 # │   - DSP ottimizzato per satelliti compatti, crossover 110-120 Hz (tutti Small)   │
-# │   - Voce: compressore dinamico FC per intelligibilità a basso volume             │
+# │   - Voce: EQ sartoriale FC, dinamica piena, nessun compressore                   │
 # │   - Surround psicoacustici controllati                                           │
-# │   - LFE: highpass 32 Hz + lowpass 110 Hz + compressore picchi + limiter          │
+# │   - LFE: highpass 32 Hz + lowpass 110 Hz + limiter picchi (sub Kenwood)          │
 # │   - Pipeline leggibile: input -> split -> voice -> surround -> output            │
 # ╰──────────────────────────────────────────────────────────────────────────────────╯
 
@@ -58,7 +58,7 @@ PARAMETRI:
   preset    : aegis | sonar | wide | aura | voice (default: sonar).
   volamp    : Gain finale opzionale in dB prima del limiter.
               Valori consentiti: 0 .. 6.0.
-              0 = OFF, default = 3.0 dB.
+              0 = OFF, default = 4.0 dB.
               Esempi pratici: 0 | 3.0 | 4.0 | 5.0 | 6.0
 ESEMPIO:
   ./aegis_sonar_wide_aura_voice_volamp_psycho.sh eac3 si "film.mkv" 768k sonar
@@ -99,7 +99,7 @@ shift 2
 INPUT_FILE=""
 BITRATE=""
 SUR_MODE=""
-VOLAMP_DB="3.0"
+VOLAMP_DB="4.0"
 POSITIONAL=("$@")
 
 # Ultimo parametro opzionale = volamp (0 .. 6.0 dB)
@@ -156,16 +156,28 @@ case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1 
 }
 [[ "$BITRATE" =~ [kKmM]$ ]] || BITRATE="${BITRATE}k"
 
-# Whitelist secca dei bitrate ammessi per codec: zero encoding falliti per valori idioti.
-case "${OUT_CODEC}:${BITRATE,,}" in
-  ac3:448k|ac3:512k|ac3:640k) ;;
-  eac3:448k|eac3:512k|eac3:640k|eac3:768k) ;;
-  *)
-    err "Bitrate non consentito per $OUT_CODEC: $BITRATE"
-    err "Consentiti: AC3=448k/512k/640k ; EAC3=448k/512k/640k/768k"
-    exit 1
-    ;;
-esac
+# Validazione bitrate continua: accetto tutti i valori nel range 256..768 kbps.
+BITRATE_LC="${BITRATE,,}"
+if [[ "$BITRATE_LC" =~ ^([0-9]+)$ ]]; then
+  BITRATE_KBPS="${BASH_REMATCH[1]}"
+elif [[ "$BITRATE_LC" =~ ^([0-9]+)k$ ]]; then
+  BITRATE_KBPS="${BASH_REMATCH[1]}"
+elif [[ "$BITRATE_LC" =~ ^([0-9]+)m$ ]]; then
+  BITRATE_KBPS="$(( ${BASH_REMATCH[1]} * 1000 ))"
+else
+  err "Bitrate non valido: $BITRATE"
+  err "Formato accettato: numero intero opzionalmente con suffisso k o M (es. 256, 320k, 1M)."
+  exit 1
+fi
+
+if (( BITRATE_KBPS < 256 || BITRATE_KBPS > 768 || ((BITRATE_KBPS - 256) % 64) != 0 )); then
+  err "Bitrate non consentito per $OUT_CODEC: ${BITRATE_KBPS}k"
+  err "Consentiti: 256k, 320k, 384k, 448k, 512k, 576k, 640k, 704k, 768k"
+  exit 1
+fi
+
+# Normalizzo sempre il valore in uscita come NNk.
+BITRATE="${BITRATE_KBPS}k"
 
 # Controllo volamp opzionale: se specificato, deve essere un numero da 0 a 6.0 (con optional decimale).
 if ! [[ "$VOLAMP_DB" =~ ^[0-9]+([.][0-9]+)?$ ]] || \
@@ -192,9 +204,10 @@ if awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v > 4.5) }'; then
   warn "volamp alto (${VOLAMP_DB} dB): controlla eventuale compressione percepita nei picchi."
 fi
 
-# Resampling finale HQ con SoX Resampler / SOXR. Precisione 28 bit, cutoff conservativo.
-ARESAMPLE_192K="aresample=192000:resampler=soxr:precision=28:cutoff=0.97"
-ARESAMPLE_48K="aresample=48000:resampler=soxr:precision=28:cutoff=0.97"
+# Resampling finale HQ con SoX Resampler / SOXR. Precisione 28 bit.
+# 192k upsample: cutoff ininfluente (no contenuto sopra 24 kHz). 48k downsample: cutoff=0.91 per meno pre-ring.
+ARESAMPLE_192K="aresample=192000:resampler=soxr:precision=28"
+ARESAMPLE_48K="aresample=48000:resampler=soxr:precision=28:cutoff=0.91"
 
 # Descrizioni preset per log: non sono parte del processing, ma aiutano a capire cosa fa ogni preset senza dover leggere il codice.
 case "$SUR_MODE" in
@@ -279,24 +292,24 @@ fi
 # BLOCCHI VOCE
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-# Equalizzazione sartioriale della voce per preset surround, con compressore dinamico per intelligibilità a basso volume. Serve a dare presenza alla voce senza rubare scena ai frontali.
+# Equalizzazione sartioriale della voce per preset surround, con EQ mirato per intelligibilità mantenendo la dinamica naturale. Serve a dare presenza alla voce senza rubare scena ai frontali.
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
-[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.2,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9,acompressor=threshold=-20dB:ratio=2.5:attack=15:release=200:makeup=1.4[FC_pre];
+[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.2,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_pre];
 EOF
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
-[FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
+[FC_pre]volume=2.7dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_AEGIS <<'EOF' || true
-[FC_pre]volume=2.2dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.5,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
+[FC_pre]volume=2.7dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.5,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_WIDE <<'EOF' || true
-[FC_pre]volume=2.3dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-0.9,volume=0.96[FCv];
+[FC_pre]volume=2.8dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-0.9,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_AURA <<'EOF' || true
-[FC_pre]volume=2.0dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.4,equalizer=f=3800:t=q:w=2.0:g=0.9,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
+[FC_pre]volume=2.5dB,equalizer=f=1650:t=q:w=1.6:g=0.8,equalizer=f=2450:t=q:w=1.3:g=1.4,equalizer=f=3800:t=q:w=2.0:g=0.9,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
 read -r -d '' VOICE_DELTA_VOICEONLY <<'EOF' || true
-[FC_pre]volume=2.4dB,equalizer=f=1650:t=q:w=1.6:g=1.0,equalizer=f=2450:t=q:w=1.3:g=1.8,equalizer=f=3800:t=q:w=2.0:g=1.1,equalizer=f=5200:t=q:w=2.0:g=-0.5,equalizer=f=6800:t=q:w=2.0:g=-1.1,volume=0.95[FCv];
+[FC_pre]volume=2.9dB,equalizer=f=1650:t=q:w=1.6:g=1.0,equalizer=f=2450:t=q:w=1.3:g=1.8,equalizer=f=3800:t=q:w=2.0:g=1.1,equalizer=f=5200:t=q:w=2.0:g=-0.5,equalizer=f=6800:t=q:w=2.0:g=-1.1,volume=0.95[FCv];
 EOF
 
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -446,13 +459,13 @@ EOF
   fi
 }
 
-# Il blocco finale di output: converte tutti i canali in mono, applica il processing LFE (HPF 32 Hz + LPF 110 Hz + compressore + limiter), e fa il join finale in 5.1(side), resampling e limiter.
+# Il blocco finale di output: converte tutti i canali in mono, applica il processing LFE (HPF 32 Hz + LPF 110 Hz + limiter di protezione picchi sub), e fa il join finale in 5.1(side), resampling e limiter.
 build_output_join_graph() {
   cat <<EOF
 [FLp]aformat=channel_layouts=mono[FLf];
 [FRp]aformat=channel_layouts=mono[FRf];
 [FCv]aformat=channel_layouts=mono[FCf];
-[LFE]aformat=channel_layouts=mono,highpass=f=32,lowpass=f=110,acompressor=threshold=-6dB:ratio=3.0:attack=6:release=120:makeup=1.1,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
+[LFE]aformat=channel_layouts=mono,highpass=f=32,lowpass=f=110,alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
 [SL_final]aformat=channel_layouts=mono[SLf];
 [SR_final]aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
