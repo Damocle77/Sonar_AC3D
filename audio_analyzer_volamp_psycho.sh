@@ -77,17 +77,11 @@ PARAMETRI:
   run     : si     (Default) Genera o aggiorna run_processing.sh.
             no     Esegue solo l'analisi senza creare/modificare il batch.
 
-METRICA:
-  DELTA = I(SUR) - I(FC)
-  Misura il rapporto fra surround e centrale. Richiede tracce 5.1.
-
 ESEMPI:
-  ./audio_analyzer_volamp_psycho.sh "film.mkv"                         # Default: genera run_processing.sh
-  ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k no         # Solo analisi, nessun batch
-  ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k si                 # Cartella corrente + batch
-  ./audio_analyzer_volamp_psycho.sh . eac3 si 768k no                  # Cartella corrente, solo analisi
-  ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k no "ep01.mkv" "ep02.mkv"
-  ./audio_analyzer_volamp_psycho.sh --files eac3 si 768k "ep01.mkv" "ep02.mkv"  
+  ./audio_analyzer_volamp_psycho.sh "film.mkv"                        # Default: genera run_processing.sh
+  ./audio_analyzer_volamp_psycho.sh "film.mkv" eac3 si 768k no        # Solo analisi, nessun batch
+  ./audio_analyzer_volamp_psycho.sh "" eac3 no 448k si                # Cartella corrente + batch
+  ./audio_analyzer_volamp_psycho.sh . eac3 si 768k no                 # Cartella corrente, solo analisi
 -----------------------------------------------------------------------------------------------------------
 USAGE
   exit 1
