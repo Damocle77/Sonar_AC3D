@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-# ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   stereo251_upmix.sh - Luglio 2026                                           │
-# │   By Sandro (D@mocle77) Sabbioni                                             │
-# │                                                                              │
-# │   Motore di upmix offline da Stereo a 5.1 (EAC3/AC3),                        │
-# │   tarato per satelliti compatti con crossover globale a 100 Hz.              │
-# │                                                                              │
-# │   Filosofia:                                                                 │
-# │     - Due soli preset operativi: to51 e quad.                                │
-# │     - FL/FR restano pieni: il phantom center originale non viene sabotato.   │
-# │     - FC come assist filtrato a 102 Hz, non sostituto dei frontali.          │
-# │     - LFE sintetico molto prudente: il ricevitore fa gia' bass management.   │
-# │     - Rear filtrati per non far parlare gli attori dietro la testa.          │
-# │     - Psicoacustica leggera: delay Haas + allpass/air a basso livello.       │
-# │     - Master limiter finale con upsample 192 kHz per contenere true peaks.   │
-# ╰──────────────────────────────────────────────────────────────────────────────╯
+# ╭──────────────────────────────────────────────────────────────────────────────────────────╮
+# │   stereo251_upmix_psycho.sh - Luglio 2026                                                │
+# │   By Sandro (D@mocle77) Sabbioni                                                         │
+# │                                                                                          │
+# │   Motore di upmix offline da Stereo a 5.1 (EAC3/AC3),                                    │
+# │   tarato per satelliti compatti con crossover globale a 110 Hz.                          │
+# │                                                                                          │
+# │   Filosofia:                                                                             │
+# │     - Due soli preset operativi: to51 e quad.                                            │
+# │     - FL/FR restano pieni: il phantom center originale non viene sabotato.               │
+# │     - FC come assist leggero; il crossover fisico resta affidato al ricevitore.          │
+# │     - LFE sintetico quasi nullo: il ricevitore esegue gia' il bass management.           │
+# │     - Rear ricavati soprattutto dalla componente laterale L-R.                           │
+# │     - Psicoacustica leggera: delay Haas + allpass/air a basso livello.                   │
+# │     - Headroom preventiva e limiter finale 4x solo come protezione dei true peak.        │
+# ╰──────────────────────────────────────────────────────────────────────────────────────────╯
 
 C_INFO="\033[0;36m[INFO]\033[0m"
 C_WARN="\033[0;33m[WARNING]\033[0m"
@@ -36,7 +36,7 @@ usage() {
   cat <<'USAGE'
 --------------------------------------------------------------------------------------
 UTILIZZO:
-  ./stereo251_upmix_psycho.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
+  ./stereo251_upmix_psycho_v9.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
 
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
@@ -44,24 +44,23 @@ PARAMETRI:
   file      : Nome del file, oppure "" per batch sulla cartella corrente.
   bitrate   : Es. 448k, 640k, 768k, 448K, 512 (default: 448k).
   preset    : to51  (default) Upmix 2.0 -> 5.1 controllato, cinema domestico.
-              quad  Quadrifonia ponderata, naturale e meno invasiva.
-
+              quad  Quadrifonia ponderata per musica/concerti; non per fiction.
 PRESET:
   to51:
     - FL/FR pieni.
     - FC assist, filtrato e controllato.
-    - Surround da side-matrix L-R + rear-bed psicoacustico leggero.
+    - Surround principalmente da side-matrix L-R + rear-bed mono molto attenuato.
     - Migliore per film/serie/anime stereo larghi o action.
 
   quad:
     - FL -> SL e FR -> SR con delay Haas, banda limitata e volume prudente.
     - FC e LFE molto leggeri.
-    - Migliore per concerti, TV stereo, anime/film vecchi, materiale mono-ish.
+    - Riservato a concerti e musica; puo' trascinare dialoghi nei posteriori.
 
 ESEMPI:
-  ./stereo251_upmix_psycho_V8_to51_quad.sh eac3 no 'movie.mkv' 448k to51
-  ./stereo251_upmix_psycho_V8_to51_quad.sh eac3 si 'concert.mkv' 640k quad
-  ./stereo251_upmix_psycho_V8_to51_quad.sh ac3 no "" 448k to51
+  ./stereo251_upmix_psycho_v9.sh eac3 no 'movie.mkv' 448k to51
+  ./stereo251_upmix_psycho_v9.sh eac3 si 'concert.mkv' 640k quad
+  ./stereo251_upmix_psycho_v9.sh ac3 no "" 448k to51
   --------------------------------------------------------------------------------------
 USAGE
   exit 1
@@ -80,18 +79,40 @@ case "$OUT_CODEC" in ac3|eac3) ;; *) err "Codec deve essere ac3 o eac3"; exit 1;
 [[ "$KEEP_STEREO" =~ ^(si|no)$ ]] || { err "Parametro 2 deve essere 'si' o 'no'"; exit 1; }
 case "$MODE" in to51|quad) ;; *) err "Preset '$MODE' non valido. Usa to51 o quad."; exit 1;; esac
 
-# Normalizza bitrate: accetta 448, 448k, 448K, 1M.
+if ! ffmpeg -hide_banner -encoders 2>/dev/null | grep -E "^[[:space:]]*A[.A-Z]*[[:space:]]+${OUT_CODEC}[[:space:]]" >/dev/null; then
+  err "Encoder FFmpeg '${OUT_CODEC}' non disponibile in questa build."
+  exit 1
+fi
+
+# Normalizza e valida il bitrate in funzione del codec.
 if [[ "$BITRATE" =~ ^([0-9]+)([kKmM]?)$ ]]; then
   _br_num="${BASH_REMATCH[1]}"
-  _br_sfx="${BASH_REMATCH[2]}"
+  _br_sfx="${BASH_REMATCH[2],,}"
   [[ -z "$_br_sfx" ]] && _br_sfx="k"
-  [[ "$_br_sfx" == "K" ]] && _br_sfx="k"
-  BITRATE="${_br_num}${_br_sfx}"
 else
   err "Bitrate '$BITRATE' non valido. Es: 448k, 640k, 768k, 448K, 512."
   exit 1
 fi
-unset _br_num _br_sfx
+
+if [[ "$_br_sfx" == "m" ]]; then
+  BITRATE_KBPS="$(( _br_num * 1000 ))"
+else
+  BITRATE_KBPS="$_br_num"
+fi
+
+MAX_BITRATE_KBPS=768
+[[ "$OUT_CODEC" == "ac3" ]] && MAX_BITRATE_KBPS=640
+if (( BITRATE_KBPS < 256 || BITRATE_KBPS > MAX_BITRATE_KBPS || ((BITRATE_KBPS - 256) % 64) != 0 )); then
+  err "Bitrate non consentito per ${OUT_CODEC^^}: ${BITRATE_KBPS}k"
+  if [[ "$OUT_CODEC" == "ac3" ]]; then
+    err "Consentiti: 256k, 320k, 384k, 448k, 512k, 576k, 640k"
+  else
+    err "Consentiti: 256k, 320k, 384k, 448k, 512k, 576k, 640k, 704k, 768k"
+  fi
+  exit 1
+fi
+BITRATE="${BITRATE_KBPS}k"
+unset _br_num _br_sfx MAX_BITRATE_KBPS
 
 info "Upmix Mode:     ${MODE^^}"
 info "Codec target:   ${OUT_CODEC^^} @ ${BITRATE}"
@@ -119,7 +140,8 @@ confirm_overwrite() {
 # ────────────────────────────────────────────────────────────────────────────────
 # Selezione stream score-based
 # Score: 2 canali (stereo) +1000, default +200, lingua italiana +300.
-# A parita' di score vince il primo trovato.
+# Il parser usa coppie chiave=valore: ffprobe non garantisce l'ordine richiesto
+# delle entry, quindi il vecchio CSV posizionale era fragile.
 # Restituisce via stdout: idx|ch|lang
 # ────────────────────────────────────────────────────────────────────────────────
 pick_best_stereo_stream() {
@@ -127,24 +149,32 @@ pick_best_stereo_stream() {
   local raw_data
   raw_data=$(ffprobe -v error -select_streams a \
     -show_entries stream=index,channels:stream_disposition=default:stream_tags=language \
-    -of csv=p=0 "$f" 2>/dev/null </dev/null || true)
+    -of compact=p=0:nk=0 "$f" 2>/dev/null </dev/null || true)
   raw_data="${raw_data//$'\r'/}"
 
   [[ -z "$raw_data" ]] && return 1
-  # Score-based selection
-  local best_line="" best_score=-1
-  local lines
-  mapfile -t lines <<< "$raw_data"
-  for line in "${lines[@]}"; do
+
+  local best_line="" best_score=-1 line
+  while IFS= read -r line; do
     [[ -z "$line" ]] && continue
-    local idx ch def lang
-    IFS=',' read -r idx ch def lang <<<"$line"
-    ch="${ch:-0}"
-    def="${def:-0}"
-    lang="${lang:-}"
-    # Score calculation
+
+    local idx="" ch="0" def="0" lang="" field
+    local fields=()
+    IFS='|' read -r -a fields <<<"$line"
+    for field in "${fields[@]}"; do
+      case "$field" in
+        index=*)               idx="${field#index=}" ;;&
+        channels=*)            ch="${field#channels=}" ;;&
+        disposition:default=*) def="${field#disposition:default=}" ;;&
+        tag:language=*)        lang="${field#tag:language=}" ;;&
+      esac
+    done
+
+    [[ "$idx" =~ ^[0-9]+$ ]] || continue
+    [[ "$ch" =~ ^[0-9]+$ ]] || ch=0
+
     local score=0
-    [[ "$ch" =~ ^[0-9]+$ && "$ch" -eq 2 ]] && score=$((score + 1000))
+    (( ch == 2 )) && score=$((score + 1000))
     [[ "$def" == "1" ]] && score=$((score + 200))
     [[ "${lang,,}" =~ ^it ]] && score=$((score + 300))
 
@@ -152,10 +182,10 @@ pick_best_stereo_stream() {
       best_score=$score
       best_line="${idx}|${ch}|${lang:-und}"
     fi
-  done
+  done <<< "$raw_data"
 
   [[ -n "$best_line" ]] || return 1
-  echo "$best_line"
+  printf '%s\n' "$best_line"
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -181,7 +211,8 @@ for f in "${FILES[@]}"; do
     *_UPMIX_5.1_V5_MODERN.mkv|*_UPMIX_5.1_V5_VINTAGE.mkv|\
     *_UPMIX_5.1_V6_MODERN.mkv|*_UPMIX_5.1_V6_VINTAGE.mkv|\
     *_UPMIX_5.1_V7_MODERN.mkv|*_UPMIX_5.1_V7_VINTAGE.mkv|\
-    *_UPMIX_5.1_V8_TO51.mkv|*_UPMIX_5.1_V8_QUAD.mkv)
+    *_UPMIX_5.1_V8_TO51.mkv|*_UPMIX_5.1_V8_QUAD.mkv|\
+    *_UPMIX_5.1_V9_TO51.mkv|*_UPMIX_5.1_V9_QUAD.mkv)
       info "Skip output gia' upmixato: $f"
       continue
       ;;
@@ -195,37 +226,38 @@ FILES=("${FILTERED_FILES[@]}")
 (( ${#FILES[@]} == 0 )) && { err "Nessun file trovato da processare."; exit 1; }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Configurazione preset V8
+# Configurazione preset V9
 # Defaults interni: non serve esportare variabili prima del lancio.
 # Le variabili sono comunque sovrascrivibili dall'ambiente per debug avanzato.
 # ────────────────────────────────────────────────────────────────────────────────
-FRONT_VOL="${FRONT_VOL:-1.00}"
+FRONT_VOL="${FRONT_VOL:-0.96}"
 
 case "$MODE" in
   to51)
     # Upmix 2.0 -> 5.1 controllato.
     # Center assist: presente ma non ruba il phantom center originale.
-    FC_MIX="${FC_MIX:-0.38}"
-    FC_VOL="${FC_VOL:-0.84}"
-    FC_HP="${FC_HP:-102}"
-    FC_LP="${FC_LP:-5800}"
-    FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.9,equalizer=f=620:t=q:w=1.0:g=-0.5,equalizer=f=1750:t=q:w=1.5:g=0.5,equalizer=f=2550:t=q:w=1.25:g=0.8,equalizer=f=3700:t=q:w=1.7:g=0.5,equalizer=f=5800:t=q:w=1.8:g=-0.8}"
+    FC_MIX="${FC_MIX:-0.32}"
+    FC_VOL="${FC_VOL:-0.86}"
+    FC_HP="${FC_HP:-60}"
+    FC_LP="${FC_LP:-6500}"
+    FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.7,equalizer=f=650:t=q:w=1.0:g=-0.4,equalizer=f=1750:t=q:w=1.5:g=0.5,equalizer=f=2550:t=q:w=1.25:g=0.8,equalizer=f=3800:t=q:w=1.7:g=0.5,equalizer=f=6500:t=q:w=1.8:g=-0.6}"
 
     # LFE sintetico molto prudente: il sub riceve gia' bass management dal ricevitore.
-    LFE_VOL="${LFE_VOL:-0.10}"
+    LFE_VOL="${LFE_VOL:-0.035}"
 
     # Rear: side matrix + piccolo rear bed decorrelato.
-    SUR_DELAY="${SUR_DELAY:-18}"
-    SUR_PAN="${SUR_PAN:-0.58}"
-    SUR_VOL="${SUR_VOL:-0.95}"
-    SUR_BED_VOL="${SUR_BED_VOL:-0.16}"
-    BED_DELAY_L="${BED_DELAY_L:-28}"
-    BED_DELAY_R="${BED_DELAY_R:-38}"
+    SUR_DELAY_L="${SUR_DELAY_L:-14}"
+    SUR_DELAY_R="${SUR_DELAY_R:-20}"
+    SUR_PAN="${SUR_PAN:-0.50}"
+    SUR_VOL="${SUR_VOL:-0.86}"
+    SUR_BED_VOL="${SUR_BED_VOL:-0.06}"
+    BED_DELAY_L="${BED_DELAY_L:-24}"
+    BED_DELAY_R="${BED_DELAY_R:-33}"
 
     # Psicoacustica leggera: allpass + air a basso livello.
-    SUR_EQ="highpass=f=150:t=q:w=0.707,lowpass=f=9000,equalizer=f=5200:t=q:w=1.4:g=0.5,equalizer=f=7200:t=q:w=2.0:g=-0.6"
-    BED_EQ="highpass=f=230:t=q:w=0.707,lowpass=f=6500,equalizer=f=950:t=q:w=1.2:g=-1.2,equalizer=f=1800:t=q:w=1.4:g=-4.0,equalizer=f=3000:t=q:w=1.6:g=-3.4,equalizer=f=5200:t=q:w=1.8:g=0.3"
-    MODE_TITLE="V8 TO51 Psycho Controlled"
+    SUR_EQ="highpass=f=170:t=q:w=0.707,lowpass=f=8500,equalizer=f=5200:t=q:w=1.4:g=0.3,equalizer=f=7200:t=q:w=2.0:g=-0.8"
+    BED_EQ="highpass=f=320:t=q:w=0.707,lowpass=f=5600,equalizer=f=700:t=q:w=1.1:g=-2.0,equalizer=f=1500:t=q:w=1.2:g=-5.5,equalizer=f=2600:t=q:w=1.4:g=-6.0,equalizer=f=4000:t=q:w=1.6:g=-3.0,equalizer=f=5200:t=q:w=1.8:g=-1.0"
+    MODE_TITLE="V9 TO51 Plausible Matrix"
     ;;
 
   quad)
@@ -233,11 +265,11 @@ case "$MODE" in
     # Center e LFE sono volutamente piu' leggeri.
     FC_MIX="${FC_MIX:-0.28}"
     FC_VOL="${FC_VOL:-0.78}"
-    FC_HP="${FC_HP:-102}"
+    FC_HP="${FC_HP:-60}"
     FC_LP="${FC_LP:-5200}"
     FC_EQ="${FC_EQ:-equalizer=f=260:t=q:w=1.15:g=-0.7,equalizer=f=650:t=q:w=1.0:g=-0.4,equalizer=f=1800:t=q:w=1.5:g=0.4,equalizer=f=2600:t=q:w=1.25:g=0.6,equalizer=f=3600:t=q:w=1.7:g=0.4,equalizer=f=5200:t=q:w=1.8:g=-0.8}"
 
-    LFE_VOL="${LFE_VOL:-0.08}"
+    LFE_VOL="${LFE_VOL:-0.03}"
     # Rear: quadrifonia con delay Haas, banda limitata e volume prudente.
     QUAD_DELAY_L="${QUAD_DELAY_L:-16}"
     QUAD_DELAY_R="${QUAD_DELAY_R:-19}"
@@ -245,7 +277,7 @@ case "$MODE" in
     QUAD_HP="${QUAD_HP:-250}"
     QUAD_LP="${QUAD_LP:-8000}"
     QUAD_AIR_VOL="${QUAD_AIR_VOL:-0.035}"
-    MODE_TITLE="V8 QUAD Weighted Psycho"
+    MODE_TITLE="V9 QUAD Music Weighted"
     ;;
 esac
 
@@ -253,7 +285,7 @@ info "Front vol:      ${FRONT_VOL}"
 info "Center:         mix ${FC_MIX}, HP ${FC_HP}Hz, LP ${FC_LP}Hz, vol ${FC_VOL}"
 info "LFE synth:      vol ${LFE_VOL}"
 if [[ "$MODE" == "to51" ]]; then
-  info "Rear side:      pan ${SUR_PAN}, vol ${SUR_VOL}, delay ${SUR_DELAY}ms"
+  info "Rear side:      pan ${SUR_PAN}, vol ${SUR_VOL}, delay ${SUR_DELAY_L}/${SUR_DELAY_R}ms"
   info "Rear bed:       vol ${SUR_BED_VOL}, delays ${BED_DELAY_L}/${BED_DELAY_R}ms"
 else
   info "Rear quad:      vol ${QUAD_VOL}, delay ${QUAD_DELAY_L}/${QUAD_DELAY_R}ms, band ${QUAD_HP}-${QUAD_LP}Hz"
@@ -280,15 +312,15 @@ build_to51_filter() {
 [lfe_src]pan=1c|c0=0.5*FL+0.5*FR[lfe_mono];
 [lfe_mono]highpass=f=20:t=q:w=0.707,lowpass=f=85,equalizer=f=45:t=q:w=1.2:g=0.4,equalizer=f=120:t=q:w=1.0:g=-2.8,volume=__LFE_VOL__[LFE_out];
 [rear_src]asplit=3[sl_side_in][sr_side_in][bed_src];
-[sl_side_in]pan=1c|c0=__SUR_PAN__*FL-__SUR_PAN__*FR,adelay=__SUR_DELAY__,allpass=f=1400:width_type=o:width=0.65,__SUR_EQ__,volume=__SUR_VOL__[SL_side];
-[sr_side_in]pan=1c|c0=__SUR_PAN__*FR-__SUR_PAN__*FL,adelay=__SUR_DELAY__,allpass=f=1200:width_type=o:width=0.65,__SUR_EQ__,volume=__SUR_VOL__[SR_side];
+[sl_side_in]pan=1c|c0=__SUR_PAN__*FL-__SUR_PAN__*FR,adelay=__SUR_DELAY_L__,allpass=f=1400:width_type=o:width=0.65,__SUR_EQ__,volume=__SUR_VOL__[SL_side];
+[sr_side_in]pan=1c|c0=__SUR_PAN__*FR-__SUR_PAN__*FL,adelay=__SUR_DELAY_R__,allpass=f=1200:width_type=o:width=0.65,__SUR_EQ__,volume=__SUR_VOL__[SR_side];
 [bed_src]pan=1c|c0=0.5*FL+0.5*FR[bed_mono];
 [bed_mono]asplit=2[bed_l][bed_r];
 [bed_l]adelay=__BED_DELAY_L__,allpass=f=900:width_type=o:width=0.60,allpass=f=2600:width_type=o:width=0.70,__BED_EQ__,volume=__SUR_BED_VOL__[SL_bed];
 [bed_r]adelay=__BED_DELAY_R__,allpass=f=1100:width_type=o:width=0.60,allpass=f=3100:width_type=o:width=0.70,__BED_EQ__,volume=__SUR_BED_VOL__[SR_bed];
 [SL_side][SL_bed]amix=inputs=2:normalize=0:dropout_transition=0[SL_out];
 [SR_side][SR_bed]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
-[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000,alimiter=limit=0.97:attack=3.0:release=60:level=0,aresample=48000[aout]
+[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000:resampler=soxr:precision=28,alimiter=limit=0.97:attack=3.0:release=60:level=0:latency=1,aresample=48000:resampler=soxr:precision=28:cutoff=0.91[aout]
 FILTER_EOF
 )
   tpl="${tpl//__A_STREAM_INDEX__/$A_STREAM_INDEX}"
@@ -300,7 +332,8 @@ FILTER_EOF
   tpl="${tpl//__FC_VOL__/$FC_VOL}"
   tpl="${tpl//__LFE_VOL__/$LFE_VOL}"
   tpl="${tpl//__SUR_PAN__/$SUR_PAN}"
-  tpl="${tpl//__SUR_DELAY__/$SUR_DELAY}"
+  tpl="${tpl//__SUR_DELAY_L__/$SUR_DELAY_L}"
+  tpl="${tpl//__SUR_DELAY_R__/$SUR_DELAY_R}"
   tpl="${tpl//__SUR_EQ__/$(esc_rep "$SUR_EQ")}"
   tpl="${tpl//__SUR_VOL__/$SUR_VOL}"
   tpl="${tpl//__BED_DELAY_L__/$BED_DELAY_L}"
@@ -333,7 +366,7 @@ build_quad_filter() {
 [SR_quad]asplit=2[SR_main][SR_air_in];
 [SR_air_in]highpass=f=1800,lowpass=f=9000,adelay=9,allpass=f=3100:width_type=o:width=0.65,equalizer=f=7200:t=q:w=2.0:g=-0.8,volume=__QUAD_AIR_VOL__[SR_air];
 [SR_main][SR_air]amix=inputs=2:normalize=0:dropout_transition=0[SR_out];
-[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000,alimiter=limit=0.97:attack=3.0:release=60:level=0,aresample=48000[aout]
+[FL_out][FR_out][FC_out][LFE_out][SL_out][SR_out]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,aresample=192000:resampler=soxr:precision=28,alimiter=limit=0.97:attack=3.0:release=60:level=0:latency=1,aresample=48000:resampler=soxr:precision=28:cutoff=0.91[aout]
 FILTER_EOF
 )
   tpl="${tpl//__A_STREAM_INDEX__/$A_STREAM_INDEX}"
@@ -354,18 +387,32 @@ FILTER_EOF
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
+# Output atomico: un errore FFmpeg non lascia un MKV finale incompleto e non
+# distrugge un output precedente fino al completamento corretto del nuovo file.
+# ────────────────────────────────────────────────────────────────────────────────
+CURRENT_TMP=""
+cleanup_tmp() {
+  [[ -n "$CURRENT_TMP" && -f "$CURRENT_TMP" ]] && rm -f -- "$CURRENT_TMP"
+}
+trap cleanup_tmp EXIT INT TERM
+
+# ────────────────────────────────────────────────────────────────────────────────
 # Ciclo elaborazione
 # ────────────────────────────────────────────────────────────────────────────────
 OVERWRITE_ALL=false
+OK_COUNT=0
+ERR_COUNT=0
+SKIP_COUNT=0
 
 for CUR_FILE in "${FILES[@]}"; do
   info "Elaborazione: $CUR_FILE"
   # Seleziona lo stream audio stereo migliore (score-based)
-  PROBE_RESULT=$(pick_best_stereo_stream "$CUR_FILE") || { warn "Nessuna traccia audio trovata. Salto."; continue; }
+  PROBE_RESULT=$(pick_best_stereo_stream "$CUR_FILE") || { warn "Nessuna traccia audio trovata. Salto."; ((SKIP_COUNT+=1)); continue; }
   IFS='|' read -r A_STREAM_INDEX A_CHANNELS A_LANG <<<"$PROBE_RESULT"
 
-  if [[ "$A_CHANNELS" -ne 2 ]]; then
+  if ! [[ "$A_CHANNELS" =~ ^[0-9]+$ ]] || [[ "$A_CHANNELS" -ne 2 ]]; then
     warn "Stream selezionato non e' stereo (Canali: $A_CHANNELS). Salto."
+    ((SKIP_COUNT+=1))
     continue
   fi
 
@@ -378,19 +425,23 @@ for CUR_FILE in "${FILES[@]}"; do
     UPMIX_FILTER="$(build_quad_filter)"
   fi
 
-  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_V8_${MODE^^}.mkv"
+  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_V9_${MODE^^}.mkv"
 
   # Controllo sovrascrittura
   if [[ -f "$OUT_FILE" ]]; then
     if [[ "$OVERWRITE_ALL" == false ]]; then
-      confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; continue; }
+      confirm_overwrite "$OUT_FILE" || { info "Skippo '$CUR_FILE'."; ((SKIP_COUNT+=1)); continue; }
     else
       info "Sovrascrittura automatica di '$OUT_FILE'..."
     fi
   fi
-  # Costruzione comando ffmpeg
-  CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning)
-  [[ -f "$OUT_FILE" ]] && CMD+=( -y )
+  # Costruzione comando ffmpeg su file temporaneo, poi rename atomico.
+  OUT_DIR=$(dirname -- "$OUT_FILE")
+  OUT_BASE=$(basename -- "${OUT_FILE%.mkv}")
+  CURRENT_TMP="${OUT_DIR}/.${OUT_BASE}.part.$$.mkv"
+  rm -f -- "$CURRENT_TMP"
+
+  CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning -y)
   CMD+=(
     -i "$CUR_FILE"
     -map_metadata 0 -map_chapters 0
@@ -398,7 +449,7 @@ for CUR_FILE in "${FILES[@]}"; do
     -map "0:V:0?" -c:v copy
     -map "0:s?" -c:s copy
     -map "0:t?" -c:t copy
-    -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -ar:a:0 48000 -ac:a:0 6
+    -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -dialnorm -31 -ar:a:0 48000 -ac:a:0 6
     -metadata:s:a:0 title="${OUT_CODEC^^} 5.1 - Upmix ${MODE_TITLE}"
     -disposition:a:0 default
   )
@@ -409,10 +460,30 @@ for CUR_FILE in "${FILES[@]}"; do
            -disposition:a:1 0 )
   fi
   # Aggiunge metadata lingua se disponibile e diversa da "und"
-  [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]] && CMD+=( -metadata:s:a:0 language="$A_LANG" )
+  if [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]]; then
+    CMD+=( -metadata:s:a:0 language="$A_LANG" )
+    [[ "$KEEP_STEREO" == "si" ]] && CMD+=( -metadata:s:a:1 language="$A_LANG" )
+  fi
 
-  CMD+=( "$OUT_FILE" )
-  "${CMD[@]}" && ok "Creato: $OUT_FILE" || warn "Errore su: $CUR_FILE"
+  CMD+=( "$CURRENT_TMP" )
+  if "${CMD[@]}" && mv -f -- "$CURRENT_TMP" "$OUT_FILE"; then
+    CURRENT_TMP=""
+    ok "Creato: $OUT_FILE"
+    ((OK_COUNT+=1))
+  else
+    warn "Errore su: $CUR_FILE"
+    cleanup_tmp
+    CURRENT_TMP=""
+    ((ERR_COUNT+=1))
+  fi
 done
 
-ok "Elaborazione completata."
+if (( ERR_COUNT > 0 )); then
+  err "Elaborazione completata con errori: OK=$OK_COUNT, FALLITI=$ERR_COUNT, SALTATI=$SKIP_COUNT"
+  exit 1
+fi
+if (( OK_COUNT == 0 )); then
+  warn "Nessun file elaborato: SALTATI=$SKIP_COUNT"
+  exit 0
+fi
+ok "Elaborazione completata: OK=$OK_COUNT, FALLITI=0, SALTATI=$SKIP_COUNT"
