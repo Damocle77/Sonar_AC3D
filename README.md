@@ -1019,4 +1019,4 @@ MIT License
 
 **Sandro (D@mocle77) Sabbioni**
 
-> Per riportare ordine nella Forza Sonora serve solo uno script Bash. Questa è la via.
+> Per riportare ordine nella Forza Sonora serve solo uno script Bash. Questa è la via!
