@@ -86,7 +86,7 @@ done
 |---|---|
 | `audio_analyzer_volamp_psycho.sh` | Analyzer 5.1 basato su Delta surround/centro, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e creazione opzionale di `run_processing.sh` |
 | `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset `aegis`, `sonar`, `wide`, `aura`, `voice`, EQ voce, surround psicoacustici e controllo LFE |
-| `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 con preset `to51` e `quad`, validazione bitrate e limiter true-peak |
+| `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 plausibile: matrice L-R, centro assist, LFE minimo, output atomico e preset `quad` dedicato alla musica |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie/ASMR/VR con BS2B, ITD, loudnorm, LFO opzionale e limiter finale |
 | `atmos_to_51_dynaudnorm_psicho.sh` | Prepara un MKV con EAC3 5.1 normalizzata come primaria e traccia Atmos/EAC3 originale copiata come secondaria |
 
@@ -373,14 +373,20 @@ Master:
 
 # 3. `stereo251_upmix_psycho.sh`
 
-Upmix offline da **stereo 2.0 a 5.1**.
+Upmix offline da **stereo 2.0 a 5.1**, progettato per ottenere una scena multicanale plausibile senza simulare informazioni discrete che non esistono nella sorgente.
 
-I preset disponibili sono:
+Il preset principale è `to51`:
 
-- `to51`: upmix controllato con side matrix L-R e rear bed;
-- `quad`: quadrifonia ponderata FL→SL e FR→SR, meno invasiva.
+- FL/FR restano full-band e mantengono il ruolo principale, con `FRONT_VOL=0.96` per creare headroom;
+- il centrale è un assist ricavato da `L+R`, non sostituisce completamente il phantom center;
+- i surround derivano soprattutto dalla componente laterale `L-R`;
+- il rear bed mono è fortemente attenuato e filtrato nella banda vocale;
+- il LFE sintetico è quasi nullo, perché il bass management resta affidato all'AVR;
+- delay asimmetrici e all-pass producono una decorrelazione leggera senza attività posteriore artificiale costante.
 
-FL/FR restano pieni. Il centrale è un assist filtrato, non sostituisce il phantom center. Il LFE sintetico è volutamente basso perché il bass management resta compito dell'AVR.
+Su una sorgente mono, dual-mono o molto stretta, surround quasi silenziosi sono un risultato corretto: lo script evita deliberatamente di spostare dialoghi e musica dietro l'ascoltatore.
+
+Il preset `quad` replica invece FL verso SL e FR verso SR con banda limitata e delay Haas. È destinato soprattutto a **musica e concerti**; non è consigliato come default per film, serie, anime o cartoon perché può trascinare dialoghi nei posteriori.
 
 ## Sintassi
 
@@ -393,90 +399,153 @@ FL/FR restano pieni. Il centrale è un assist filtrato, non sostituisce il phant
 
 | Parametro | Valori | Default | Note |
 |---|---|---:|---|
-| `codec` | `ac3`, `eac3` | obbligatorio | codec in uscita |
-| `keep` | `si`, `no` | obbligatorio | conserva la traccia stereo originale |
-| `file` | file o `""` | cartella corrente | batch se omesso/vuoto |
+| `codec` | `ac3`, `eac3` | obbligatorio | codec in uscita; la disponibilità dell'encoder viene verificata prima del processing |
+| `keep` | `si`, `no` | obbligatorio | conserva la traccia stereo originale come secondaria |
+| `file` | file o `""` | cartella corrente | batch se omesso o vuoto |
 | `bitrate` | step da `256k` a `640k` per AC3; fino a `768k` per EAC3 | `448k` | incrementi di `64k` |
 | `preset` | `to51`, `quad` | `to51` | tipo di upmix |
 
 Il parser accetta anche `448`, `448K` o valori con suffisso `M`, poi normalizza in kbps. Valori fuori range o non allineati agli step previsti vengono rifiutati prima dell'encoding.
 
+La selezione della traccia è score-based:
+
+```text
+stereo:   +1000
+italiano: +300
+default:  +200
+```
+
+Il parsing di `ffprobe` usa coppie chiave/valore e non dipende dall'ordine posizionale dei campi.
+
 ## Preset
 
 | Preset | Filosofia | Uso indicativo |
 |---|---|---|
-| `to51` | side matrix L-R + rear bed psicoacustico | film, serie, anime, stereo largo |
-| `quad` | FL→SL e FR→SR con Haas delay e banda limitata | concerti, TV, materiale vecchio o mono-ish |
+| `to51` | side matrix `L-R`, centro assist e rear bed mono appena percettibile | film, serie, anime, cartoon e fiction stereo |
+| `quad` | FL→SL e FR→SR con Haas delay e banda limitata | musica e concerti stereo |
 
 Valori principali:
 
 ```text
+COMUNE:
+  FRONT_VOL=0.96
+
 TO51:
-  FC_MIX=0.38
-  FC_VOL=0.84
-  FC_HP=102 Hz
-  LFE_VOL=0.10
-  SUR_PAN=0.58
-  SUR_VOL=0.95
-  SUR_BED_VOL=0.16
-  delay side=18 ms
-  delay bed L/R=28/38 ms
+  FC_MIX=0.32
+  FC_VOL=0.86
+  FC_HP=60 Hz
+  FC_LP=6500 Hz
+  LFE_VOL=0.035
+
+  SUR_PAN=0.50
+  SUR_VOL=0.86
+  SUR_BED_VOL=0.06
+
+  delay side L/R=14/20 ms
+  delay bed  L/R=24/33 ms
+
+  banda side=170–8500 Hz
+  banda bed=320–5600 Hz
+  attenuazione marcata del bed nella banda vocale
 
 QUAD:
   FC_MIX=0.28
   FC_VOL=0.78
-  FC_HP=102 Hz
-  LFE_VOL=0.08
+  FC_HP=60 Hz
+  FC_LP=5200 Hz
+  LFE_VOL=0.03
+
   QUAD_VOL=0.58
   delay L/R=16/19 ms
   banda rear=250–8000 Hz
   air layer=0.035
 ```
 
+Il filtro del centrale parte da `60 Hz`, invece dei precedenti `102 Hz`, per evitare una doppia attenuazione quando l'AVR applica già il crossover globale intorno a `110 Hz`.
+
 ## Catena finale
 
 ```text
-upmix 5.1(side)
+selezione stereo score-based
+→ split FL/FR
+→ centro assist L+R
+→ LFE sintetico minimo
+→ surround matrix/decorrelati
+→ join 5.1(side)
 → SOXR 192 kHz / precision 28
 → alimiter limit=0.97, attack=3 ms, release=60 ms, level=0, latency=1
 → SOXR 48 kHz / precision 28 / cutoff 0.91
 → AC3/EAC3 con dialnorm -31
 ```
 
-La lingua viene propagata sia alla traccia processata sia, quando `keep=si`, alla traccia stereo originale. Lo script mantiene contatori `OK/FALLITI/SALTATI` e restituisce exit code `1` se almeno un encoding fallisce.
+Il limiter è una protezione finale dei picchi, non un auto-level: `level=0`.
+
+La scrittura è atomica. FFmpeg produce prima un file temporaneo nascosto e lo rinomina nell'output finale solo dopo un encoding concluso correttamente. Un errore non lascia quindi un MKV finale incompleto e non distrugge un output precedente.
+
+## Output
+
+```text
+<nome>_UPMIX_5.1_V9_TO51.mkv
+<nome>_UPMIX_5.1_V9_QUAD.mkv
+```
+
+La lingua viene propagata sia alla traccia processata sia, quando `keep=si`, alla traccia stereo originale. Lo script mantiene i contatori `OK/FALLITI/SALTATI` e restituisce exit code `1` se almeno un encoding fallisce.
 
 ## Esempi
 
 ```bash
-./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k to51
-./stereo251_upmix_psycho.sh eac3 si "concert.mkv" 640k quad
+# Film, serie, anime o cartoon: preset raccomandato
+./stereo251_upmix_psycho.sh eac3 si "episodio.mkv" 448k to51
+
+# Musica o concerto
+./stereo251_upmix_psycho.sh eac3 si "concerto.mkv" 640k quad
+
+# Batch nella cartella corrente
 ./stereo251_upmix_psycho.sh ac3 no "" 448k to51
+
+# Default: EAC3, 448k, TO51
 ./stereo251_upmix_psycho.sh eac3 no
 ```
 
 ## Tuning tramite ambiente
 
-```bash
-FC_VOL=0.80 FC_MIX=0.34 \
-  ./stereo251_upmix_psycho.sh eac3 no "movie.mkv" 448k to51
+Riduzione moderata del centrale assist:
 
-QUAD_VOL=0.52 \
-  ./stereo251_upmix_psycho.sh eac3 no "concert.mkv" 448k quad
+```bash
+FC_VOL=0.82 FC_MIX=0.28 \
+  ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
+```
+
+Incremento prudente dei surround laterali, senza aumentare subito il bed mono:
+
+```bash
+SUR_VOL=0.92 \
+  ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
+```
+
+Riduzione dei posteriori nel preset musicale:
+
+```bash
+QUAD_VOL=0.50 \
+  ./stereo251_upmix_psycho.sh eac3 no "concerto.mkv" 448k quad
 ```
 
 Variabili principali:
 
 | Variabile | Effetto |
 |---|---|
-| `FRONT_VOL` | livello FL/FR |
-| `FC_VOL` | livello centrale assist |
-| `FC_MIX` | quantità mono inviata al centrale |
+| `FRONT_VOL` | livello FL/FR e headroom preventiva |
+| `FC_VOL` | livello del centrale assist |
+| `FC_MIX` | quantità di `L+R` inviata al centrale |
 | `FC_HP`, `FC_LP` | banda del centrale |
-| `SUR_PAN`, `SUR_VOL` | componente side del preset `to51` |
-| `SUR_BED_VOL`, `SUR_DELAY` | rear bed del preset `to51` |
+| `SUR_PAN`, `SUR_VOL` | componente laterale `L-R` del preset `to51` |
+| `SUR_BED_VOL` | livello del rear bed mono |
+| `SUR_DELAY_L`, `SUR_DELAY_R` | delay asimmetrici della componente side |
+| `BED_DELAY_L`, `BED_DELAY_R` | delay asimmetrici del rear bed |
 | `QUAD_VOL` | livello rear del preset `quad` |
-| `QUAD_DELAY_L/R` | delay rear |
-| `QUAD_HP`, `QUAD_LP` | banda rear |
+| `QUAD_DELAY_L`, `QUAD_DELAY_R` | delay rear del preset `quad` |
+| `QUAD_HP`, `QUAD_LP` | banda rear del preset `quad` |
+| `QUAD_AIR_VOL` | livello dell'air layer del preset `quad` |
 | `LFE_VOL` | quantità di LFE sintetico |
 
 ---
@@ -724,12 +793,10 @@ Il file dual-track resta il riferimento per la riproduzione Atmos non alterata. 
 ```text
 Stereo
 → stereo251_upmix_psycho.sh
-→ EAC3/AC3 5.1
-→ opzionalmente analyzer
-→ opzionalmente aegis
+→ EAC3/AC3 5.1 plausibile
 ```
 
-Attenzione al gain staging: l'upmix genera già nuovi canali. Se l'output viene poi processato da Aegis, evitare boost manuali aggiuntivi non misurati.
+Per film, serie, anime e cartoon usare normalmente `to51`. Il risultato dell'upmix è già un prodotto finale: un successivo passaggio con Aegis non è raccomandato come default, perché rischia di amplificare nuovamente surround sintetici e decorrelazione. Analyzer e Aegis vanno usati solo dopo misure e confronto A/B, senza boost manuali aggiuntivi non giustificati.
 
 ## Sorgente stereo per cuffie
 
@@ -869,17 +936,41 @@ Sopra `4.5 dB` il processore mostra un warning perché il limiter può lavorare 
 
 ## Il centrale dell'upmix ruba scena
 
-Ridurre prima `FC_VOL` o `FC_MIX`:
+Ridurre prima `FC_MIX`, poi eventualmente `FC_VOL`:
 
 ```bash
-FC_VOL=0.78 FC_MIX=0.34 \
+FC_MIX=0.28 FC_VOL=0.82 \
   ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
 ```
 
 ## I surround TO51 sono troppo timidi
 
+Aumentare prima la componente laterale `L-R`, senza alzare subito il bed mono:
+
 ```bash
-SUR_VOL=1.02 SUR_BED_VOL=0.20 \
+SUR_VOL=0.92 \
+  ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
+```
+
+Solo se l'ambienza resta insufficiente:
+
+```bash
+SUR_VOL=0.92 SUR_BED_VOL=0.08 \
+  ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
+```
+
+Valori molto più alti di `SUR_BED_VOL` aumentano il rischio di udire dialoghi nei posteriori.
+
+## I surround sono quasi muti su una sorgente mono
+
+È il comportamento previsto. La matrice `L-R` tende ad annullare il contenuto identico sui due canali e impedisce di creare attività posteriore artificiale. Non usare `quad` per compensare su film o serie mono-ish.
+
+## Si sentono dialoghi nei posteriori
+
+Verificare innanzitutto di usare `to51`, non `quad`. Per ridurre ulteriormente il rear bed:
+
+```bash
+SUR_BED_VOL=0.03 \
   ./stereo251_upmix_psycho.sh eac3 no "film.mkv" 448k to51
 ```
 
@@ -887,7 +978,7 @@ SUR_VOL=1.02 SUR_BED_VOL=0.20 \
 
 ```bash
 QUAD_VOL=0.50 \
-  ./stereo251_upmix_psycho.sh eac3 no "concert.mkv" 448k quad
+  ./stereo251_upmix_psycho.sh eac3 no "concerto.mkv" 448k quad
 ```
 
 ## Output già esistente
