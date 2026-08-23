@@ -16,6 +16,7 @@ set -uo pipefail
 # │     - Rear ricavati soprattutto dalla componente laterale L-R.                           │
 # │     - Psicoacustica leggera: delay Haas + allpass/air a basso livello.                   │
 # │     - Headroom preventiva e limiter finale 4x solo come protezione dei true peak.        │
+# │     - Output atomico con verifica comparativa stereo -> 5.1 prima della pubblicazione.   │
 # ╰──────────────────────────────────────────────────────────────────────────────────────────╯
 
 C_INFO="\033[0;36m[INFO]\033[0m"
@@ -32,11 +33,22 @@ for _bin in ffmpeg ffprobe; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
 
+if ! ffmpeg -hide_banner -h filter=aresample 2>&1 | grep -qi 'soxr'; then
+  err "SOXR non disponibile in questo FFmpeg: serve una build con libsoxr."
+  exit 1
+fi
+
+# Guard rail della verifica comparativa stereo -> 5.1.
+VERIFY_SILENCE_PEAK_DB="-80.0"
+VERIFY_MAX_OVERALL_DROP_DB="18.0"
+VERIFY_MAX_FRONT_DROP_DB="18.0"
+VERIFY_MIN_SAMPLE_RATIO="0.98"
+
 usage() {
   cat <<'USAGE'
 --------------------------------------------------------------------------------------
 UTILIZZO:
-  ./stereo251_upmix_psycho_v9.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
+  ./stereo251_upmix_psycho.sh <ac3|eac3> <si|no> [file|""] [bitrate] [preset]
 
 PARAMETRI:
   ac3|eac3  : Codec audio in uscita.
@@ -58,9 +70,9 @@ PRESET:
     - Riservato a concerti e musica; puo' trascinare dialoghi nei posteriori.
 
 ESEMPI:
-  ./stereo251_upmix_psycho_v9.sh eac3 no 'movie.mkv' 448k to51
-  ./stereo251_upmix_psycho_v9.sh eac3 si 'concert.mkv' 640k quad
-  ./stereo251_upmix_psycho_v9.sh ac3 no "" 448k to51
+  ./stereo251_upmix_psycho.sh eac3 no 'movie.mkv' 448k to51
+  ./stereo251_upmix_psycho.sh eac3 si 'concert.mkv' 640k quad
+  ./stereo251_upmix_psycho.sh ac3 no "" 448k to51
   --------------------------------------------------------------------------------------
 USAGE
   exit 1
@@ -386,6 +398,127 @@ FILTER_EOF
   printf '%s\n' "$tpl"
 }
 
+# Misura peak, RMS, campioni e RMS per-canale.
+measure_audio_signal() {
+  local f="$1" map_spec="$2" expected_channels="$3" probe metrics
+  probe="$(
+    ffmpeg -hide_banner -nostdin -v info -i "$f" \
+      -map "$map_spec" -vn -sn -dn \
+      -af "aformat=sample_rates=48000:sample_fmts=fltp,astats=metadata=0:reset=0" \
+      -f null - 2>&1 || true
+  )"
+  probe="${probe//$'\r'/}"
+
+  metrics="$(printf '%s\n' "$probe" | awk -v expected="$expected_channels" '
+    /Channel:/ { channel=$NF; overall=0; next }
+    /] Overall$/ { overall=1; channel=0; next }
+    /Peak level dB:/ { if (overall) overall_peak=$NF; next }
+    /RMS level dB:/ {
+      if (overall) overall_rms=$NF
+      else if (channel >= 1 && channel <= expected) channel_rms[channel]=$NF
+      next
+    }
+    /Number of samples:/ { if (overall) samples=$NF; next }
+    END {
+      if (overall_peak == "" || overall_rms == "" || samples == "") exit 1
+      for (i=1; i<=expected; i++) if (channel_rms[i] == "") exit 1
+      printf "%s|%s|%s", overall_peak, overall_rms, samples
+      for (i=1; i<=expected; i++) printf "|%s", channel_rms[i]
+      printf "\n"
+    }
+  ')" || return 1
+
+  [[ -n "$metrics" ]] || return 1
+  printf '%s\n' "$metrics"
+}
+
+is_finite_db() {
+  [[ "$1" =~ ^-?[0-9]+([.][0-9]+)?$ ]]
+}
+
+verify_upmix_output() {
+  local f="$1" input_metrics="$2" output_metrics
+  local -a in_m out_m
+  local input_peak input_rms input_samples output_peak output_rms output_samples
+  local i input_front output_front spatial_active=0 spatial_rms
+
+  output_metrics="$(measure_audio_signal "$f" "0:a:0" 6)" || {
+    VERIFY_REASON="astats non ha restituito metriche 5.1 complete per l'output"
+    return 2
+  }
+  IFS='|' read -r -a in_m <<<"$input_metrics"
+  IFS='|' read -r -a out_m <<<"$output_metrics"
+  [[ ${#in_m[@]} -eq 5 && ${#out_m[@]} -eq 9 ]] || {
+    VERIFY_REASON="numero di metriche stereo/5.1 inatteso"
+    return 2
+  }
+
+  input_peak="${in_m[0]}"; input_rms="${in_m[1]}"; input_samples="${in_m[2]}"
+  output_peak="${out_m[0]}"; output_rms="${out_m[1]}"; output_samples="${out_m[2]}"
+  if [[ "$output_peak" == "-inf" || "$output_rms" == "-inf" ]]; then
+    VERIFY_REASON="output digitalmente silenzioso"
+    return 1
+  fi
+  if ! is_finite_db "$input_peak" || ! is_finite_db "$input_rms" || \
+     ! is_finite_db "$output_peak" || ! is_finite_db "$output_rms" || \
+     ! [[ "$input_samples" =~ ^[0-9]+([.][0-9]+)?$ && "$output_samples" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    VERIFY_REASON="metriche globali non numeriche"
+    return 2
+  fi
+  if awk -v v="$output_peak" -v lim="$VERIFY_SILENCE_PEAK_DB" 'BEGIN { exit !(v <= lim) }'; then
+    VERIFY_REASON="picco output troppo basso (${output_peak} dBFS)"
+    return 1
+  fi
+  if awk -v i="$input_rms" -v o="$output_rms" -v lim="$VERIFY_MAX_OVERALL_DROP_DB" \
+       'BEGIN { exit !((i-o) > lim) }'; then
+    VERIFY_REASON="perdita RMS globale eccessiva: input=${input_rms} dBFS, output=${output_rms} dBFS"
+    return 1
+  fi
+  if awk -v i="$input_samples" -v o="$output_samples" -v ratio="$VERIFY_MIN_SAMPLE_RATIO" \
+       'BEGIN { exit !(o < i*ratio) }'; then
+    VERIFY_REASON="output troncato: campioni input=${input_samples}, output=${output_samples}"
+    return 1
+  fi
+
+  # FL e FR devono preservare i rispettivi canali sorgente quando questi sono attivi.
+  for i in {0..1}; do
+    input_front="${in_m[$((i+3))]}"
+    output_front="${out_m[$((i+3))]}"
+    [[ "$input_front" == "-inf" ]] && continue
+    if ! is_finite_db "$input_front" || \
+       { [[ "$output_front" != "-inf" ]] && ! is_finite_db "$output_front"; }; then
+      VERIFY_REASON="metrica frontale $i non numerica"
+      return 2
+    fi
+    if awk -v v="$input_front" -v lim="-65.0" 'BEGIN { exit !(v > lim) }'; then
+      if [[ "$output_front" == "-inf" ]] || \
+         awk -v src="$input_front" -v dst="$output_front" -v lim="$VERIFY_MAX_FRONT_DROP_DB" \
+           'BEGIN { exit !((src-dst) > lim) }'; then
+        VERIFY_REASON="frontale $i perso o attenuato eccessivamente"
+        return 1
+      fi
+    fi
+  done
+
+  # Almeno uno fra FC/SL/SR deve contenere il segnale sintetizzato. Questo resta
+  # valido anche per sorgenti mono, dual-mono o in opposizione di fase.
+  for i in 5 7 8; do
+    spatial_rms="${out_m[$i]}"
+    [[ "$spatial_rms" == "-inf" ]] && continue
+    is_finite_db "$spatial_rms" || { VERIFY_REASON="metrica canale sintetizzato non numerica"; return 2; }
+    if awk -v v="$spatial_rms" 'BEGIN { exit !(v > -80.0) }'; then
+      spatial_active=1
+    fi
+  done
+  if (( spatial_active == 0 )); then
+    VERIFY_REASON="FC, SL e SR risultano tutti virtualmente muti"
+    return 1
+  fi
+
+  info "Verifica audio: peak ${input_peak}→${output_peak} dBFS; RMS ${input_rms}→${output_rms} dBFS; campioni ${input_samples}→${output_samples}"
+  return 0
+}
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Output atomico: un errore FFmpeg non lascia un MKV finale incompleto e non
 # distrugge un output precedente fino al completamento corretto del nuovo file.
@@ -418,6 +551,12 @@ for CUR_FILE in "${FILES[@]}"; do
 
   info "Stream [$A_STREAM_INDEX]: ${A_CHANNELS}ch, lingua: ${A_LANG:-und}"
 
+  INPUT_AUDIO_METRICS="$(measure_audio_signal "$CUR_FILE" "0:$A_STREAM_INDEX" 2)" || {
+    err "Impossibile misurare in modo affidabile la traccia stereo sorgente. Salto."
+    ((ERR_COUNT+=1))
+    continue
+  }
+
   # Costruzione filtergraph
   if [[ "$MODE" == "to51" ]]; then
     UPMIX_FILTER="$(build_to51_filter)"
@@ -439,7 +578,11 @@ for CUR_FILE in "${FILES[@]}"; do
   OUT_DIR=$(dirname -- "$OUT_FILE")
   OUT_BASE=$(basename -- "${OUT_FILE%.mkv}")
   CURRENT_TMP="${OUT_DIR}/.${OUT_BASE}.part.$$.mkv"
-  rm -f -- "$CURRENT_TMP"
+  if [[ -e "$CURRENT_TMP" ]]; then
+    err "File temporaneo gia' esistente, impossibile procedere: $CURRENT_TMP"
+    ((ERR_COUNT+=1))
+    continue
+  fi
 
   CMD=(ffmpeg -hide_banner -nostdin -stats -loglevel warning -y)
   CMD+=(
@@ -466,12 +609,30 @@ for CUR_FILE in "${FILES[@]}"; do
   fi
 
   CMD+=( "$CURRENT_TMP" )
-  if "${CMD[@]}" && mv -f -- "$CURRENT_TMP" "$OUT_FILE"; then
-    CURRENT_TMP=""
-    ok "Creato: $OUT_FILE"
-    ((OK_COUNT+=1))
+  if "${CMD[@]}"; then
+    VERIFY_REASON=""
+    verify_upmix_output "$CURRENT_TMP" "$INPUT_AUDIO_METRICS"
+    VERIFY_RC=$?
+    case "$VERIFY_RC" in
+      0)
+        if mv -f -- "$CURRENT_TMP" "$OUT_FILE"; then
+          CURRENT_TMP=""
+          ok "Creato e verificato: $OUT_FILE"
+          ((OK_COUNT+=1))
+        else
+          err "Verifica superata, ma pubblicazione fallita: $CURRENT_TMP"
+          ((ERR_COUNT+=1))
+        fi
+        ;;
+      1|2)
+        err "Candidato rifiutato dalla verifica audio: ${VERIFY_REASON}: $CURRENT_TMP"
+        err "Il file finale non viene toccato; il candidato resta per il debug."
+        CURRENT_TMP=""
+        ((ERR_COUNT+=1))
+        ;;
+    esac
   else
-    warn "Errore su: $CUR_FILE"
+    warn "Errore su: $CUR_FILE (candidato incompleto rimosso)"
     cleanup_tmp
     CURRENT_TMP=""
     ((ERR_COUNT+=1))
