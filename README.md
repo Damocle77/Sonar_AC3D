@@ -2,7 +2,7 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Psychoacoustic Suite - FFmpeg - Agosto 2026
+# 🎧 Psychoacoustic Suite - Agosto 2026
 
 Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e trasformare tracce audio stereo, 5.1 ed EAC3 Atmos/JOC in modo offline, ripetibile e controllato.
 
