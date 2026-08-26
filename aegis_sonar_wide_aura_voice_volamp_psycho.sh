@@ -10,7 +10,8 @@ set -uo pipefail
 # │   migliorando l'intelligibilità dei dialoghi e ripristinando la bolla            │
 # │   surround (Aegis, Sonar, Wide, Aura), con controllo mirato dei picchi LFE.      │
 # │                                                                                  │
-# │   - DSP ottimizzato per impianto 5.1/5.2, crossover unico 110 Hz (tutti Small)   │
+# │   - Diffusori Small: bass management/crossover 110 Hz affidato all'AVR           │
+# │   - Canali principali: highpass di sicurezza a 40 Hz                             │
 # │   - Voce: EQ sartoriale FC, dinamica piena, nessun compressore                   │
 # │   - Surround psicoacustici controllati                                           │
 # │   - LFE: highpass 32 Hz + lowpass 110 Hz + limiter picchi                        │

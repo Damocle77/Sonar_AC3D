@@ -286,7 +286,7 @@ Motore principale per tracce **5.1 esistenti**.
 - processing surround differenziato per preset;
 - air/decorrelation layer controllato;
 - trattamento LFE: high-pass `32 Hz`, low-pass `110 Hz`, volamp prima del limiter dedicato;
-- frontali di riferimento a torre 3 vie, mantenuti `Small` con crossover AVR unico a circa `110 Hz`;
+- diffusori mantenuti `Small`, con bass management e crossover a circa `110 Hz` affidati all'AVR; lo script applica ai canali principali solo un high-pass di sicurezza a `40 Hz`;
 - `FRONT_EQ` leggermente adattato alle torri senza widening o alterazioni della scena frontale;
 - volamp manuale `0–6.0 dB`, default **4.0 dB**;
 - warning sopra `4.5 dB`;

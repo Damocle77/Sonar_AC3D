@@ -9,7 +9,7 @@ set -uo pipefail
 # │   Misura il bilanciamento surround/centro e genera run_processing.sh            │
 # │   per il processore aegis_sonar_wide_aura_voice_volamp_psycho.sh.               │
 # │                                                                                 │
-# │   CLASSIFIER V6 (RMS full-duration + banda voce, stesso passaggio):             │
+# │   CLASSIFIER (RMS full-duration + banda voce, stesso passaggio):                │
 # │     - DeltaSur = RMS(SL/SR) - RMS(FL/FR/FC)                                     │
 # │     - DeltaFC  = RMS full-band(FC) - RMS full-band(FL/FR)                       │
 # │     - VoiceDelta = RMS 250-5000 Hz(FC) - RMS 250-5000 Hz(FL/FR)                 │
@@ -170,9 +170,9 @@ fi
 BATCH_BITRATE="${BITRATE_KBPS}k"
 # Nota: non controllo se i file in --files esistono qui, lo faccio dopo per permettere di passare anche file parzialmente inesistenti senza bloccare tutto.
 if [[ "$MULTI_FILES_MODE" == true ]]; then
-  info "Metrica: CLASSIFIER V6 RMS + VOICE BAND | Input: lista manuale (${#MULTI_FILES[@]} file) | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=${CREATE_RUN}"
+  info "Metrica: CLASSIFIER RMS + VOICE BAND | Input: lista manuale (${#MULTI_FILES[@]} file) | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=${CREATE_RUN}"
 else
-  info "Metrica: CLASSIFIER V6 RMS + VOICE BAND | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=${CREATE_RUN}"
+  info "Metrica: CLASSIFIER RMS + VOICE BAND | Batch: ${BATCH_CODEC} / keep=${BATCH_KEEP} / ${BATCH_BITRATE} / run_processing=${CREATE_RUN}"
 fi
 info "Volamp heuristic: make-up DSP 4.0 dB + recupero loudness con step 4 / 4.5 / 5 / 5.5 dB"
 
@@ -211,7 +211,7 @@ PRESET_BORDERLINE_MARGIN="0.7"
 ANALYZER_SILENCE_PEAK_DB="-80.0"
 
 info "Target loudness analitico: ${LOUDNESS_TARGET} LUFS"
-info "Classifier V6: voice FC/front=${VOICE_DELTA_GATE} dB | voice SUR/FC=${VOICE_MASK_GATE} dB | FC safety=${CENTER_FULL_SAFETY_GATE} dB"
+info "Classifier: voice FC/front=${VOICE_DELTA_GATE} dB | voice SUR/FC=${VOICE_MASK_GATE} dB | FC safety=${CENTER_FULL_SAFETY_GATE} dB"
 
 # Variabili globali per il verdetto stagionale
 GLOBAL_METRIC_VALUES=()
@@ -426,7 +426,7 @@ classify_preset_v6() {
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Misura Loudness Integrata (I:), LRA e sample peak dell'intero stream in UN SOLO passaggio.
-# ebur128 emette tutte e tre le metriche nello stesso log: niente doppia decodifica
+# Le tre metriche vengono lette dal summary finale di ebur128: niente doppia decodifica
 # (rilevante su Git Bash/Windows, dove ogni pass ffmpeg costa di piu').
 # Args: file stream_index | Output: "I|LRA|PEAK" (campi vuoti se non misurabili)
 # ────────────────────────────────────────────────────────────────────────────────
@@ -439,7 +439,7 @@ measure_stream_i_lra() {
   ffmpeg -y -nostdin -hide_banner -nostats \
     -i "$f" \
     -map "0:${stream}" \
-    -af "ebur128=peak=sample:framelog=verbose" \
+    -af "ebur128=peak=sample" \
     -vn -sn -f null - \
     >/dev/null 2>"$log_file" </dev/null || true
 
@@ -794,7 +794,7 @@ scan_delta() {
   GLOBAL_REASON_VALUES+=("$preset_reason")
 
   # Display dei risultati per il file, con colori e descrizioni. Se alcune metriche non sono misurabili, le segnalo come N/A. Se il preset è stato forzato, mostro comunque il preset forzato ma con la descrizione che indica la ragione.
-  ok "Risultati Classifier V6 per: $f"
+  ok "Risultati Classifier per: $f"
   echo -e "  \033[1;33mRMS MAIN: \033[0m  ${rms_main} dBFS  (media energetica FL/FR/FC)"
   echo -e "  \033[1;33mRMS SUR:  \033[0m  ${rms_sur} dBFS  (media energetica SL/SR)"
   echo -e "  \033[1;37mDeltaSur: \033[0m  ${p_color}${delta_sur} dB\033[0m  (SUR - MAIN)"
@@ -911,7 +911,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
     # Se il verdetto e' MIXED, mostro le metriche decisive per ogni file.
     if [[ "$season_preset" == "MIXED" ]]; then
       echo ""
-      echo -e "  \033[0;33m⚠  La stagione e' eterogenea o non ha consenso sufficiente.\033[0m"
+      echo -e "  \033[0;33m   La stagione è eterogenea o non ha consenso sufficiente.\033[0m"
       echo -e "  \033[0;33m   Per risultati ottimali, considera i preset per-file:\033[0m"
       echo ""
       for (( i=0; i<CNT; i++ )); do
@@ -995,9 +995,9 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   fi
 else
   if [[ "$CREATE_RUN" == "si" ]]; then
-    warn "Nessun risultato Classifier V6 valido: run_processing.sh non generato."
+    warn "Nessun risultato Classifier valido: run_processing.sh non generato."
   else
-    warn "Nessun risultato Classifier V6 valido."
+    warn "Nessun risultato Classifier valido."
   fi
 fi
 
