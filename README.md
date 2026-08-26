@@ -8,7 +8,7 @@ Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e tra
 
 > Non tutti i supereroi indossano un mantello. Alcuni lanciano `ffmpeg` e salvano i dialoghi dal multiverso del mix sbagliato.
 
-La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier V6 dell'analyzer misura scena full-band, prominenza della voce, mascheramento e width dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
+La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier dell'analyzer misura scena full-band, prominenza della voce, mascheramento e width dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
 
 La taratura 5.1 è pensata per un impianto domestico ibrido con frontali a torre 3 vie, centrale e surround compatti, tutti configurati **Small** con crossover AVR unico intorno a **110 Hz**, uno o due subwoofer attivi gestiti dall'AVR, ascolto medio/basso e priorità all'intelligibilità della voce italiana.
 
@@ -92,7 +92,7 @@ done
 
 | Script | Scopo |
 |---|---|
-| `audio_analyzer_volamp_psycho.sh` | Classifier V6 per 5.1: Delta surround/centro, banda voce, mascheramento, width, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e batch opzionale |
+| `audio_analyzer_volamp_psycho.sh` | Classifier per 5.1: Delta surround/centro, banda voce, mascheramento, width, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e batch opzionale |
 | `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset `aegis`, `sonar`, `wide`, `aura`, `voice`, EQ voce, surround psicoacustici e controllo LFE |
 | `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 plausibile: matrice L-R, centro assist, LFE minimo, output atomico/verificato e preset `quad` dedicato alla musica |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie/ASMR/VR con BS2B, ITD opzionale, loudnorm post-DSP, LFO e output atomico/verificato |
@@ -129,7 +129,7 @@ Per eseguire solo l'analisi senza creare o modificare `run_processing.sh`:
 
 Analyzer per tracce **5.1**. Non modifica i file audio.
 
-Il classificatore V6 separa la scena full-band dalla banda utile alla voce:
+Il classificatore separa la scena full-band dalla banda utile alla voce:
 
 ```text
 DeltaSur   = RMS(SL/SR) - RMS(FL/FR/FC)
@@ -208,7 +208,7 @@ Nella modalità `--files`, il token dopo il bitrate viene interpretato come `run
   "ep01.mkv" "ep02.mkv"
 ```
 
-## Decisione V6 → preset
+## Decisione → preset
 
 | Priorità | Condizione principale | Preset | Interpretazione |
 |---:|---|---|---|
@@ -268,7 +268,7 @@ L'ultimo parametro numerico è il volamp realmente passato al processore. Il bat
 PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"
 ```
 
-Il batch usa sempre il preset V6 per-file, derivato da `DeltaSur`, `DeltaFC`, `VoiceDelta`, `VoiceMask`, balance, `Width MS` ed eventuali override di sicurezza. Il P25 di `DeltaSur` è soltanto diagnostico; il verdetto stagionale richiede almeno 2/3 di consenso e non sostituisce mai il preset scritto nelle singole righe del batch.
+Il batch usa sempre il preset per-file, derivato da `DeltaSur`, `DeltaFC`, `VoiceDelta`, `VoiceMask`, balance, `Width MS` ed eventuali override di sicurezza. Il P25 di `DeltaSur` è soltanto diagnostico; il verdetto stagionale richiede almeno 2/3 di consenso e non sostituisce mai il preset scritto nelle singole righe del batch.
 
 ---
 

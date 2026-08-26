@@ -192,7 +192,7 @@ VOLAMP_MAX="5.5"
 # di AURA/AEGIS. Non tocca SONAR (deficit estremo) ne' VOICE.
 WIDTH_WIDE_GATE="-7.0"
 
-# Classificatore V6: l'energia full-band descrive la scena; la banda 250-5000 Hz
+# Classificatore: l'energia full-band descrive la scena; la banda 250-5000 Hz
 # descrive la prominenza del parlato senza far pesare eccessivamente bassi ed LFE.
 SUR_FAKE_RMS_GATE="-65.0"
 CENTER_FULL_SAFETY_GATE="-9.0" # FC full-band - FL/FR: anomalia severa
@@ -349,7 +349,7 @@ preset_color() {
   esac
 }
 
-# Classificatore V6: priorita' alla voce, poi alla correzione spaziale.
+# Classificatore: priorita' alla voce, poi alla correzione spaziale.
 # Output: PRESET|COLORE|CONFIDENCE|ALTERNATIVE|REASON
 classify_preset_v6() {
   local delta_sur="$1" delta_fc="$2" delta_voice="$3" voice_mask="$4" width="$5"
@@ -682,7 +682,7 @@ scan_delta() {
       warn "Layout audio '${layout:-unknown}' non standard: mapping posizionale sicuro c0..c5." ;;
   esac
 
-  # Tutte le metriche RMS V6 vengono calcolate nella stessa decodifica.
+  # Tutte le metriche RMS vengono calcolate nella stessa decodifica.
   info "Misura RMS scena, Width e banda voce 250-5000 Hz... (un solo passaggio)"
   local all_rms rms_fl rms_fr rms_fc rms_sl rms_sr rms_mid rms_side
   local rms_vfl rms_vfr rms_vfc rms_vsl rms_vsr
@@ -976,7 +976,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
         file_alternative="${GLOBAL_ALTERNATIVE_VALUES[$i]:--}"
         escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
   
-        # Il commento conserva le metriche V6, la confidenza e l'alternativa.
+        # Il commento conserva le metriche, la confidenza e l'alternativa.
         printf '"$PROC" "$CODEC" "$KEEP" "$BITRATE" %s %s %s  # DeltaSur=%s dB | DeltaFC=%s dB | VoiceDelta=%s dB | VoiceMask=%s dB | Balance=%s dB | Width=%s dB | conf=%s alt=%s | I=%s LUFS LRA=%s LU\n' \
           "$file_preset_lower" "$file_volamp" "$escaped_path" "${GLOBAL_METRIC_VALUES[$i]}" \
           "$file_delta_fc" "$file_delta_voice" "$file_voice_mask" "$file_balance" "$file_width" "$file_confidence" "$file_alternative" \
