@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # ╭─────────────────────────────────────────────────────────────────────────────────╮
-# │   audio_analyzer_volamp_psycho.sh - Agosto 2026                                 │
+# │   audio_analyzer_volamp_psycho.sh - Settembre 2026                              │
 # │   By Sandro (D@mocle77) Sabbioni                                                │
 # │                                                                                 │
 # │   Sonda euristica per l'analisi offline di container multimediali 5.1.          │
@@ -20,7 +20,7 @@ set -uo pipefail
 # │   DECISIONE: silenzio/falso 5.1 -> sicurezza; voce debole o mascherata          │
 # │   -> VOICE; surround molto arretrati -> SONAR; surround stretti                 │
 # │   -> WIDE; moderatamente arretrati -> AURA; mix equilibrato -> AEGIS.           │
-# │   Le misure RMS dei canali vengono raccolte in un solo passaggio FFmpeg.        │
+# │   PASS A EBU e PASS B RMS condividono una sola decodifica FFmpeg.               │
 # │                                                                                 │
 # │   VERDETTO STAGIONALE:                                                          │
 # │   Verdetto: servono almeno 2/3 di consenso; parita'/spread > 4 dB -> MIXED.     │
@@ -33,6 +33,7 @@ C_INFO="\033[0;36m[INFO]\033[0m"
 C_WARN="\033[0;33m[WARNING]\033[0m"
 C_ERR="\033[0;31m[ERROR]\033[0m"
 C_OK="\033[0;32m[OK]\033[0m"
+C_PROGRESS="\033[1;35m[AVANZAMENTO]\033[0m"
 
 # Funzioni di log con colori: info, warn, err, ok. Usate per output coerente e facilmente distinguibile.
 info(){ echo -e "${C_INFO} $*"; }
@@ -41,7 +42,7 @@ err(){  echo -e "${C_ERR}  $*"; }
 ok(){   echo -e "${C_OK}  $*"; }
 
 # Controllo binari essenziali: ffmpeg, ffprobe, awk. Se uno manca, esco con errore. Importante per evitare errori a cascata quando si tenta di analizzare i file.
-for _bin in ffmpeg ffprobe awk; do
+for _bin in ffmpeg ffprobe awk sort; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
 
@@ -210,14 +211,60 @@ PRESET_BORDERLINE_MARGIN="0.7"
 # silenzio/quasi-silenzio e non deve produrre preset o comandi batch.
 ANALYZER_SILENCE_PEAK_DB="-80.0"
 
+# Sample Peak rapido per l'analisi sorgente. Il True Peak che tutela il risultato
+# finale resta obbligatorio post-codec nella verifica del processore.
+ANALYZER_PROGRESS_INTERVAL="${ANALYZER_PROGRESS_INTERVAL:-15}"
+if ! [[ "$ANALYZER_PROGRESS_INTERVAL" =~ ^[0-9]+$ ]] || (( ANALYZER_PROGRESS_INTERVAL < 1 )); then
+  ANALYZER_PROGRESS_INTERVAL="15"
+fi
+ASTATS_RMS_OPTS="metadata=0:reset=0:measure_perchannel=RMS_level:measure_overall=none"
+
+# Soglie del profilo tonale FC volutamente conservative. La zona NORMAL e' ampia;
+# questi valori restano da calibrare sul corpus, senza usare il validation set.
+FC_DARK_PRESENCE_MAX="-12.0"
+FC_DARK_MID_MAX="-5.0"
+FC_BRIGHT_PRESENCE_MIN="2.0"
+FC_SIBILANT_INDEX_MIN="2.0"
+
+# Analisi della dinamica surround. Soglie iniziali da calibrare sul corpus.
+WINDOW_ACTIVITY_GATE="-55.0"
+SUR_MIN_ACTIVE_WINDOWS="10"
+SUR_AMBIENT_P95_MAX="14.0"
+SUR_AMBIENT_TAIL95_MAX="5.0"
+SUR_TRANSIENT_P95_MIN="20.0"
+SUR_HOT22_AMBIENT_MAX="1.0"
+SUR_HOT22_TRANSIENT_MIN="5.0"
+
 info "Target loudness analitico: ${LOUDNESS_TARGET} LUFS"
 info "Classifier: voice FC/front=${VOICE_DELTA_GATE} dB | voice SUR/FC=${VOICE_MASK_GATE} dB | FC safety=${CENTER_FULL_SAFETY_GATE} dB"
+info "Peak input: Sample Peak rapido; avanzamento ogni ${ANALYZER_PROGRESS_INTERVAL}s"
 
 # Variabili globali per il verdetto stagionale
 GLOBAL_METRIC_VALUES=()
 GLOBAL_METRIC_FILES=()
 GLOBAL_METRIC_PATHS=()
 GLOBAL_LOUDNESS_VALUES=()
+GLOBAL_INPUT_PEAK_VALUES=()
+GLOBAL_FC_BODY_VALUES=()
+GLOBAL_FC_MID_VALUES=()
+GLOBAL_FC_PRESENCE_VALUES=()
+GLOBAL_FC_SIBILANCE_VALUES=()
+GLOBAL_PRESENCE_INDEX_VALUES=()
+GLOBAL_SIBILANCE_INDEX_VALUES=()
+GLOBAL_FC_PROFILE_VALUES=()
+GLOBAL_FC_CONFIDENCE_VALUES=()
+GLOBAL_SUR_ACTIVE_VALUES=()
+GLOBAL_CREST_P50_VALUES=()
+GLOBAL_CREST_P90_VALUES=()
+GLOBAL_CREST_P95_VALUES=()
+GLOBAL_CREST_P99_VALUES=()
+GLOBAL_CREST_MAX_VALUES=()
+GLOBAL_TAIL95_VALUES=()
+GLOBAL_TAIL99_VALUES=()
+GLOBAL_HOT22_VALUES=()
+GLOBAL_HOT25_VALUES=()
+GLOBAL_SUR_PROFILE_VALUES=()
+GLOBAL_SUR_CONFIDENCE_VALUES=()
 GLOBAL_VOLAMP_VALUES=()
 GLOBAL_WIDTH_VALUES=()
 GLOBAL_LRA_VALUES=()
@@ -351,7 +398,7 @@ preset_color() {
 
 # Classificatore: priorita' alla voce, poi alla correzione spaziale.
 # Output: PRESET|COLORE|CONFIDENCE|ALTERNATIVE|REASON
-classify_preset_v6() {
+classify_spatial_preset() {
   local delta_sur="$1" delta_fc="$2" delta_voice="$3" voice_mask="$4" width="$5"
   awk -v ds="$delta_sur" -v df="$delta_fc" -v dv="$delta_voice" \
       -v vm="$voice_mask" -v w="$width" \
@@ -425,31 +472,26 @@ classify_preset_v6() {
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Misura Loudness Integrata (I:), LRA e sample peak dell'intero stream in UN SOLO passaggio.
-# Le tre metriche vengono lette dal summary finale di ebur128: niente doppia decodifica
-# (rilevante su Git Bash/Windows, dove ogni pass ffmpeg costa di piu').
-# Args: file stream_index | Output: "I|LRA|PEAK" (campi vuoti se non misurabili)
+# Estrae Loudness Integrata, LRA e Sample Peak esclusivamente dall'ultimo
+# summary completo di ebur128. Non interpreta Peak appartenenti ad altre sezioni.
+# Args: log_file | Output: "I|LRA|SAMPLE_PEAK"; errore se incompleto.
 # ────────────────────────────────────────────────────────────────────────────────
-measure_stream_i_lra() {
-  local f="$1" stream="$2"
-  local log_file
-  log_file=$(mktemp -p "$ANALYZER_TMPDIR")
-  # Il sample peak distingue il vero silenzio dal valore sentinella -70 LUFS
-  # restituito da ebur128 per una traccia digitalmente vuota.
-  ffmpeg -y -nostdin -hide_banner -nostats \
-    -i "$f" \
-    -map "0:${stream}" \
-    -af "ebur128=peak=sample" \
-    -vn -sn -f null - \
-    >/dev/null 2>"$log_file" </dev/null || true
-
-  local i_val lra_val peak_val
-  i_val=$(grep -E "^\s+I:\s+-?[0-9]" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
-  lra_val=$(grep -E "^\s+LRA:\s+-?[0-9]" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
-  peak_val=$(grep -E "^\s+Peak:\s+(-?[0-9]|-inf)" "$log_file" | tr -d '\r' | awk '{print $2}' | tail -1)
-  rm -f "$log_file"
-
-  echo "${i_val:-}|${lra_val:-}|${peak_val:-}"
+parse_ebur128_summary() {
+  awk '
+    /Summary:/ { in_summary=1; section=""; i_val=""; lra_val=""; peak_val=""; next }
+    !in_summary { next }
+    /^[[:space:]]*Integrated loudness:[[:space:]]*$/ { section="integrated"; next }
+    /^[[:space:]]*Loudness range:[[:space:]]*$/      { section="range"; next }
+    /^[[:space:]]*Sample peak:[[:space:]]*$/         { section="sample_peak"; next }
+    section == "integrated" && /^[[:space:]]*I:[[:space:]]+/    { i_val=$2; next }
+    section == "range"      && /^[[:space:]]*LRA:[[:space:]]+/  { lra_val=$2; next }
+    section == "sample_peak" && /^[[:space:]]*Peak:[[:space:]]+/ { peak_val=$2; next }
+    END {
+      number="^-?[0-9]+([.][0-9]+)?$"
+      if (i_val !~ number || lra_val !~ number || (peak_val !~ number && peak_val != "-inf")) exit 1
+      printf "%s|%s|%s\n", i_val, lra_val, peak_val
+    }
+  ' "$1"
 }
 
 is_finite_db() {
@@ -512,7 +554,7 @@ source_volume_status() {
 }
 
 # ───────────────────────────────────────────────────────────────────────────────────
-# (LRA ora misurata insieme a I: in measure_stream_i_lra, un solo passaggio ebur128)
+# (I, LRA e Sample Peak sono misurati dal ramo EBU del PASS A/B combinato.)
 # ───────────────────────────────────────────────────────────────────────────────────
 
 # ───────────────────────────────────────────────────────────────────────────────────
@@ -556,56 +598,246 @@ width_to_desc() {
   fi
 }
 
+# Classificazione timbrica prudenziale del centrale. Usa solo rapporti tra
+# bande FC e resta indipendente da DeltaFC/VoiceDelta. In caso di ambiguita'
+# o metrica non valida il chiamante mantiene NORMAL.
+classify_fc_profile() {
+  local presence_index="$1" sibilance_index="$2" mid_index="$3"
+  awk -v pi="$presence_index" -v si="$sibilance_index" -v mi="$mid_index" \
+      -v dark_pi="$FC_DARK_PRESENCE_MAX" -v dark_mi="$FC_DARK_MID_MAX" \
+      -v bright_pi="$FC_BRIGHT_PRESENCE_MIN" -v sib_si="$FC_SIBILANT_INDEX_MIN" 'BEGIN {
+    profile="NORMAL"; confidence="alta"; reason="deadband centrale"
+
+    # SIBILANT richiede sia una coda 5-9 kHz dominante sia presenza non scura.
+    if (si >= sib_si && pi >= -3.0) {
+      profile="SIBILANT"; reason="coda alta FC chiaramente dominante"
+      if (si < sib_si+1.5 || pi < -1.5) confidence="bassa"
+    }
+    # BRIGHT richiede presenza nettamente sopra il body, ma non una coda
+    # abbastanza forte da soddisfare la condizione SIBILANT.
+    else if (pi >= bright_pi && si < sib_si) {
+      profile="BRIGHT"; reason="presenza FC chiaramente elevata"
+      if (pi < bright_pi+1.5) confidence="bassa"
+    }
+    # DARK usa due indici concordi: presenza/body e mid/body.
+    else if (pi <= dark_pi && mi <= dark_mi) {
+      profile="DARK"; reason="presenza e medi FC chiaramente arretrati"
+      if (pi > dark_pi-2.0 || mi > dark_mi-2.0) confidence="bassa"
+    }
+    # Vicino a qualunque frontiera si resta NORMAL con confidenza bassa.
+    else if ((pi > dark_pi-2.0 && pi < dark_pi+2.0) ||
+             (pi > bright_pi-2.0 && pi < bright_pi+2.0) ||
+             (si > sib_si-2.0 && si < sib_si+2.0)) {
+      confidence="bassa"; reason="deadband/borderline: nessuna correzione"
+    }
+
+    printf "%s|%s|%s", profile, confidence, reason
+  }'
+}
+
+# Converte un percorso temporaneo nel formato accettato dentro un filtergraph
+# FFmpeg. Su Git Bash il drive Windows richiede l'escape del carattere ':'.
+ffmpeg_filter_path() {
+  local p="$1"
+  if command -v cygpath &>/dev/null; then
+    p=$(cygpath -m "$p") || return 1
+  fi
+  p="${p/:/\\:}"
+  printf '%s\n' "$p"
+}
+
+# Combina per indice le finestre SL/SR prodotte da ametadata. Il Crest Factor
+# di astats e' lineare: viene convertito in dB solo dopo l'activity gate.
+# Output: TOTAL|ACTIVE|P50|P90|P95|P99|MAX|TAIL95|TAIL99|HOT22|HOT25
+measure_surround_transients() {
+  local sl_log="$1" sr_log="$2" crest_values sorted_values counts total active stats
+  crest_values=$(mktemp -p "$ANALYZER_TMPDIR")
+  sorted_values=$(mktemp -p "$ANALYZER_TMPDIR")
+
+  counts=$(awk -v out="$crest_values" -v gate="$WINDOW_ACTIVITY_GATE" '
+    FNR == 1 { source++ }
+    /^frame:/ { frame=$1; sub(/^frame:/,"",frame); next }
+    /lavfi[.]astats[.]1[.]RMS_level=/ {
+      split($0,a,"="); if (source == 1) sl_rms[frame]=a[2]; else sr_rms[frame]=a[2]; next
+    }
+    /lavfi[.]astats[.]1[.]Crest_factor=/ {
+      split($0,a,"="); if (source == 1) sl_crest[frame]=a[2]; else sr_crest[frame]=a[2]; next
+    }
+    END {
+      number="^-?[0-9]+([.][0-9]+)?$"; total=0; active=0
+      for (f in sl_rms) {
+        if (!(f in sr_rms)) continue
+        total++
+        if (sl_rms[f] !~ number || sr_rms[f] !~ number ||
+            sl_crest[f] !~ number || sr_crest[f] !~ number ||
+            sl_crest[f] <= 0 || sr_crest[f] <= 0) continue
+        power=(10^(sl_rms[f]/10)+10^(sr_rms[f]/10))/2
+        sur_rms=10*log(power)/log(10)
+        if (sur_rms <= gate) continue
+        crest=(sl_crest[f] > sr_crest[f]) ? sl_crest[f] : sr_crest[f]
+        crest_db=20*log(crest)/log(10)
+        printf "%.6f\n", crest_db > out
+        active++
+      }
+      printf "%d|%d\n", total, active
+    }
+  ' "$sl_log" "$sr_log") || { rm -f "$crest_values" "$sorted_values"; return 1; }
+
+  IFS='|' read -r total active <<<"$counts"
+  if ! [[ "$active" =~ ^[0-9]+$ ]] || (( active == 0 )); then
+    rm -f "$crest_values" "$sorted_values"
+    printf '%s|0|N/A|N/A|N/A|N/A|N/A|N/A|N/A|0.0|0.0\n' "${total:-0}"
+    return 0
+  fi
+
+  sort -n "$crest_values" > "$sorted_values" || {
+    rm -f "$crest_values" "$sorted_values"
+    return 1
+  }
+  stats=$(awk '
+    { v[NR]=$1+0 }
+    function pct(p, raw,rank) {
+      raw=p*n; rank=int(raw); if (raw>rank) rank++
+      if (rank<1) rank=1; if (rank>n) rank=n
+      return v[rank]
+    }
+    END {
+      n=NR; if (!n) exit 1
+      p50=pct(0.50); p90=pct(0.90); p95=pct(0.95); p99=pct(0.99)
+      hot22=0; hot25=0
+      for (i=1;i<=n;i++) { if (v[i]>22) hot22++; if (v[i]>25) hot25++ }
+      printf "%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f|%.1f", \
+        p50,p90,p95,p99,v[n],p95-p50,p99-p50,100*hot22/n,100*hot25/n
+    }
+  ' "$sorted_values") || { rm -f "$crest_values" "$sorted_values"; return 1; }
+  rm -f "$crest_values" "$sorted_values"
+  printf '%s|%s|%s\n' "$total" "$active" "$stats"
+}
+
+# Classificatore ibrido: baseline, coda e frequenza degli eventi devono essere
+# concordi. MAX non entra mai nella decisione; MIXED e' sempre il fallback.
+classify_sur_profile() {
+  local active="$1" p50="$2" p95="$3" tail95="$4" hot22="$5"
+  if ! [[ "$active" =~ ^[0-9]+$ ]] || (( active < SUR_MIN_ACTIVE_WINDOWS )) || \
+     ! is_finite_db "$p50" || ! is_finite_db "$p95" || \
+     ! is_finite_db "$tail95" || ! is_finite_db "$hot22"; then
+    echo "MIXED|bassa|fallback: finestre attive insufficienti o metriche non valide"
+    return
+  fi
+
+  awk -v p50="$p50" -v p95="$p95" -v tail="$tail95" -v hot="$hot22" \
+      -v ambient_p95="$SUR_AMBIENT_P95_MAX" -v ambient_tail="$SUR_AMBIENT_TAIL95_MAX" \
+      -v transient_p95="$SUR_TRANSIENT_P95_MIN" \
+      -v ambient_hot="$SUR_HOT22_AMBIENT_MAX" -v transient_hot="$SUR_HOT22_TRANSIENT_MIN" 'BEGIN {
+    profile="MIXED"; confidence="alta"; reason="distribuzione ibrida/borderline"
+    if (p95 <= ambient_p95 && tail <= ambient_tail && hot <= ambient_hot) {
+      profile="AMBIENT"; reason="coda crest bassa e impulsi rari"
+      if (p95 > ambient_p95-2 || tail > ambient_tail-1.5 || hot > ambient_hot/2) confidence="bassa"
+    } else if (p95 >= transient_p95 && hot >= transient_hot) {
+      profile="TRANSIENT"; reason="P95 alto e quota impulsiva significativa"
+      if (p95 < transient_p95+2 || hot < transient_hot+3) confidence="bassa"
+    } else if ((p95 > ambient_p95-2 && p95 < ambient_p95+2) ||
+               (p95 > transient_p95-2 && p95 < transient_p95+2) ||
+               (hot > transient_hot-2 && hot < transient_hot+2)) {
+      confidence="bassa"
+    }
+    printf "%s|%s|%s", profile, confidence, reason
+  }'
+}
+
 # ────────────────────────────────────────────────────────────────────────────────
-# Misura in un'unica decodifica sia i canali full-band sia FL/FR/FC/SL/SR
-# filtrati nella banda 250-5000 Hz, utile per stimare prominenza e mascheramento
-# della voce. Le istanze astats hanno nomi stabili.
-# Output: "FL|FR|FC|SL|SR|MID|SIDE|VFL|VFR|VFC|VSL|VSR"
+# Misura in un'unica decodifica PASS A (I/LRA/picco) e PASS B. I canali
+# full-band condividono una sola istanza astats multicanale; lo stesso vale
+# per la banda voce. MID/SIDE, bande FC e finestre SL/SR sono rami diagnostici.
+# Output: "FL|FR|FC|SL|SR|MID|SIDE|VFL|VFR|VFC|VSL|VSR|FC_BODY|FC_MID|
+#          FC_PRESENCE|FC_SIBILANCE|I|LRA|PEAK|SUR_STATS..."
 # ────────────────────────────────────────────────────────────────────────────────
 measure_all_rms() {
   local f="$1" stream="$2"
-  local log_file
+  local log_file progress_file sl_window_log sr_window_log
+  local sl_window_log_ff sr_window_log_ff ffmpeg_pid ffmpeg_rc processed last_processed=""
   log_file=$(mktemp -p "$ANALYZER_TMPDIR")
+  progress_file=$(mktemp -p "$ANALYZER_TMPDIR")
+  sl_window_log=$(mktemp -p "$ANALYZER_TMPDIR")
+  sr_window_log=$(mktemp -p "$ANALYZER_TMPDIR")
+  sl_window_log_ff=$(ffmpeg_filter_path "$sl_window_log") || return 1
+  sr_window_log_ff=$(ffmpeg_filter_path "$sr_window_log") || return 1
 
   ffmpeg -y -nostdin -hide_banner -nostats \
+    -stats_period "$ANALYZER_PROGRESS_INTERVAL" -progress "$progress_file" \
     -i "$f" \
-    -filter_complex "[0:${stream}]asplit=12[a0][a1][a2][a3][a4][a5][a6][a7][a8][a9][a10][a11];\
-[a0]pan=1c|c0=c0,astats@fl=metadata=0:reset=0[o0];\
-[a1]pan=1c|c0=c1,astats@fr=metadata=0:reset=0[o1];\
-[a2]pan=1c|c0=c2,astats@fc=metadata=0:reset=0[o2];\
-[a3]pan=1c|c0=c4,astats@sl=metadata=0:reset=0[o3];\
-[a4]pan=1c|c0=c5,astats@sr=metadata=0:reset=0[o4];\
-[a5]pan=1c|c0=0.5*c4+0.5*c5,astats@mid=metadata=0:reset=0[o5];\
-[a6]pan=1c|c0=0.5*c4-0.5*c5,astats@side=metadata=0:reset=0[o6];\
-[a7]pan=1c|c0=c0,highpass=f=250,lowpass=f=5000,astats@vfl=metadata=0:reset=0[o7];\
-[a8]pan=1c|c0=c1,highpass=f=250,lowpass=f=5000,astats@vfr=metadata=0:reset=0[o8];\
-[a9]pan=1c|c0=c2,highpass=f=250,lowpass=f=5000,astats@vfc=metadata=0:reset=0[o9];\
-[a10]pan=1c|c0=c4,highpass=f=250,lowpass=f=5000,astats@vsl=metadata=0:reset=0[o10];\
-[a11]pan=1c|c0=c5,highpass=f=250,lowpass=f=5000,astats@vsr=metadata=0:reset=0[o11]" \
-    -map "[o0]" -map "[o1]" -map "[o2]" -map "[o3]" \
-    -map "[o4]" -map "[o5]" -map "[o6]" -map "[o7]" \
-    -map "[o8]" -map "[o9]" -map "[o10]" -map "[o11]" \
+    -filter_complex "[0:${stream}]asplit=7[full][voice][mid_in][side_in][fc_bands_in][sur_windows_in][ebu];\
+[full]astats@full=${ASTATS_RMS_OPTS},anullsink;\
+[voice]highpass=f=250,lowpass=f=5000,astats@voice=${ASTATS_RMS_OPTS},anullsink;\
+[mid_in]pan=1c|c0=0.5*c4+0.5*c5,astats@mid=${ASTATS_RMS_OPTS},anullsink;\
+[side_in]pan=1c|c0=0.5*c4-0.5*c5,astats@side=${ASTATS_RMS_OPTS},anullsink;\
+[fc_bands_in]pan=1c|c0=c2,asplit=4[fc_body_in][fc_mid_in][fc_presence_in][fc_sibilance_in];\
+[fc_body_in]highpass=f=250,lowpass=f=800,astats@fc_body=${ASTATS_RMS_OPTS},anullsink;\
+[fc_mid_in]highpass=f=800,lowpass=f=1600,astats@fc_mid=${ASTATS_RMS_OPTS},anullsink;\
+[fc_presence_in]highpass=f=1600,lowpass=f=4000,astats@fc_presence=${ASTATS_RMS_OPTS},anullsink;\
+[fc_sibilance_in]highpass=f=5000,lowpass=f=9000,astats@fc_sibilance=${ASTATS_RMS_OPTS},anullsink;\
+[sur_windows_in]asplit=2[sl_window_in][sr_window_in];\
+[sl_window_in]pan=1c|c0=c4,aformat=sample_rates=48000:sample_fmts=fltp,asetnsamples=n=48000:p=1,astats=metadata=1:reset=1:measure_perchannel=RMS_level+Crest_factor:measure_overall=none,ametadata=mode=print:file='${sl_window_log_ff}':direct=1,anullsink;\
+[sr_window_in]pan=1c|c0=c5,aformat=sample_rates=48000:sample_fmts=fltp,asetnsamples=n=48000:p=1,astats=metadata=1:reset=1:measure_perchannel=RMS_level+Crest_factor:measure_overall=none,ametadata=mode=print:file='${sr_window_log_ff}':direct=1,anullsink;\
+[ebu]ebur128=peak=sample:framelog=verbose[o0]" \
+    -map "[o0]" \
     -vn -sn -f null - \
-    >/dev/null 2>"$log_file" </dev/null || true
+    >/dev/null 2>"$log_file" </dev/null &
+  ffmpeg_pid=$!
 
-  local rms_values
-  rms_values=$(awk '/RMS level dB:/ {
-    if      (index($0,"[astats@fl "))   fl=$NF
-    else if (index($0,"[astats@fr "))   fr=$NF
-    else if (index($0,"[astats@fc "))   fc=$NF
-    else if (index($0,"[astats@sl "))   sl=$NF
-    else if (index($0,"[astats@sr "))   sr=$NF
-    else if (index($0,"[astats@mid "))  mid=$NF
-    else if (index($0,"[astats@side ")) side=$NF
-    else if (index($0,"[astats@vfl "))  vfl=$NF
-    else if (index($0,"[astats@vfr "))  vfr=$NF
-    else if (index($0,"[astats@vfc "))  vfc=$NF
-    else if (index($0,"[astats@vsl "))  vsl=$NF
-    else if (index($0,"[astats@vsr "))  vsr=$NF
-  } END { printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s", fl,fr,fc,sl,sr,mid,side,vfl,vfr,vfc,vsl,vsr }' "$log_file")
-  rm -f "$log_file"
+  while kill -0 "$ffmpeg_pid" 2>/dev/null; do
+    sleep 2
+    processed=$(awk -F= '$1 == "out_time" { value=$2 } END { print value }' "$progress_file" 2>/dev/null)
+    if [[ -n "$processed" && "$processed" != "$last_processed" ]]; then
+      printf '%b Audio analizzato: %s\n' "$C_PROGRESS" "$processed" >&2
+      last_processed="$processed"
+    fi
+  done
+  wait "$ffmpeg_pid"
+  ffmpeg_rc=$?
+  if (( ffmpeg_rc != 0 )); then
+    rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
+    return 1
+  fi
 
-  echo "$rms_values"
+  local rms_values ebu_values sur_stats
+  rms_values=$(awk '
+  /Channel:/ {
+    if      (index($0,"[astats@full "))  full_channel=$NF
+    else if (index($0,"[astats@voice ")) voice_channel=$NF
+    next
+  }
+  /RMS level dB:/ {
+    if (index($0,"[astats@full ")) {
+      if      (full_channel == 1) fl=$NF
+      else if (full_channel == 2) fr=$NF
+      else if (full_channel == 3) fc=$NF
+      else if (full_channel == 5) sl=$NF
+      else if (full_channel == 6) sr=$NF
+    } else if (index($0,"[astats@voice ")) {
+      if      (voice_channel == 1) vfl=$NF
+      else if (voice_channel == 2) vfr=$NF
+      else if (voice_channel == 3) vfc=$NF
+      else if (voice_channel == 5) vsl=$NF
+      else if (voice_channel == 6) vsr=$NF
+    } else if (index($0,"[astats@mid "))           mid=$NF
+      else if (index($0,"[astats@side "))          side=$NF
+      else if (index($0,"[astats@fc_body "))       fc_body=$NF
+      else if (index($0,"[astats@fc_mid "))        fc_mid=$NF
+      else if (index($0,"[astats@fc_presence "))   fc_presence=$NF
+      else if (index($0,"[astats@fc_sibilance "))  fc_sibilance=$NF
+  } END { printf "%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s|%s", fl,fr,fc,sl,sr,mid,side,vfl,vfr,vfc,vsl,vsr,fc_body,fc_mid,fc_presence,fc_sibilance }' "$log_file")
+  ebu_values=$(parse_ebur128_summary "$log_file") || {
+    rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
+    return 1
+  }
+  sur_stats=$(measure_surround_transients "$sl_window_log" "$sr_window_log") || {
+    rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
+    return 1
+  }
+  rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
+
+  echo "${rms_values}|${ebu_values}|${sur_stats}"
 }
 
 # Media energetica in dB di due o tre valori RMS. I valori devono essere finiti.
@@ -652,25 +884,6 @@ scan_delta() {
   fi
   info "Stream selezionato: [$target_stream], ${max_ch} canali, layout ${layout:-unknown}."
 
-  # Misura globale anticipata: il sample peak permette di rifiutare una traccia
-  # digitalmente vuota prima che il valore sentinella -70 LUFS venga scambiato
-  # per una loudness valida.
-  local i_full lra_full peak_full _i_lra_peak
-  _i_lra_peak=$(measure_stream_i_lra "$f" "$target_stream")
-  IFS='|' read -r i_full lra_full peak_full <<<"$_i_lra_peak"
-  if [[ "$peak_full" == "-inf" ]]; then
-    warn "Traccia audio digitalmente silenziosa. File saltato."
-    return 1
-  fi
-  if ! is_finite_db "$peak_full"; then
-    warn "Sample peak globale non misurabile. File saltato."
-    return 1
-  fi
-  if awk -v peak="$peak_full" -v gate="$ANALYZER_SILENCE_PEAK_DB" 'BEGIN { exit !(peak <= gate) }'; then
-    warn "Traccia audio quasi silenziosa (peak ${peak_full} dBFS). File saltato."
-    return 1
-  fi
-
   # Mapping posizionale robusto, allineato al processore principale: nell'ordine
   # canonico 5.1 c2 e' FC, c4/c5 sono i surround. Non dipende dai nomi del layout.
   case "$layout" in
@@ -682,13 +895,37 @@ scan_delta() {
       warn "Layout audio '${layout:-unknown}' non standard: mapping posizionale sicuro c0..c5." ;;
   esac
 
-  # Tutte le metriche RMS vengono calcolate nella stessa decodifica.
-  info "Misura RMS scena, Width e banda voce 250-5000 Hz... (un solo passaggio)"
+  # PASS A e PASS B restano separati logicamente, ma condividono la decodifica:
+  # il contenitore video viene quindi letto una sola volta per file.
+  info "PASS A/B combinato: Loudness, LRA, Sample Peak, RMS, Width e banda voce..."
   local all_rms rms_fl rms_fr rms_fc rms_sl rms_sr rms_mid rms_side
-  local rms_vfl rms_vfr rms_vfc rms_vsl rms_vsr
-  all_rms=$(measure_all_rms "$f" "$target_stream")
+  local rms_vfl rms_vfr rms_vfc rms_vsl rms_vsr i_full lra_full input_peak_full
+  local fc_body fc_mid fc_presence fc_sibilance
+  local sur_total_windows sur_active_windows crest_p50 crest_p90 crest_p95 crest_p99 crest_max
+  local tail95 tail99 hot22 hot25
+  all_rms=$(measure_all_rms "$f" "$target_stream") || {
+    warn "Analisi combinata non conclusiva o summary EBU R128 non valido. File saltato."
+    return 1
+  }
   IFS='|' read -r rms_fl rms_fr rms_fc rms_sl rms_sr rms_mid rms_side \
-    rms_vfl rms_vfr rms_vfc rms_vsl rms_vsr <<<"$all_rms"
+    rms_vfl rms_vfr rms_vfc rms_vsl rms_vsr fc_body fc_mid fc_presence fc_sibilance \
+    i_full lra_full input_peak_full sur_total_windows sur_active_windows \
+    crest_p50 crest_p90 crest_p95 crest_p99 crest_max tail95 tail99 hot22 hot25 <<<"$all_rms"
+
+  # Il picco distingue il vero silenzio dal valore sentinella -70 LUFS
+  # restituito da ebur128 per una traccia digitalmente vuota.
+  if [[ "$input_peak_full" == "-inf" ]]; then
+    warn "Traccia audio digitalmente silenziosa. File saltato."
+    return 1
+  fi
+  if ! is_finite_db "$input_peak_full"; then
+    warn "Sample Peak globale non misurabile. File saltato."
+    return 1
+  fi
+  if awk -v peak="$input_peak_full" -v gate="$ANALYZER_SILENCE_PEAK_DB" 'BEGIN { exit !(peak <= gate) }'; then
+    warn "Traccia audio quasi silenziosa (Sample Peak ${input_peak_full} dBFS). File saltato."
+    return 1
+  fi
 
   local fl_math fr_math fc_math sl_math sr_math
   fl_math=$(db_floor_for_math "$rms_fl") || { warn "RMS FL non misurabile. File saltato."; return 1; }
@@ -736,6 +973,27 @@ scan_delta() {
   width_ms=$(awk -v side="$side_math" -v mid="$mid_math" 'BEGIN { printf "%.1f", side-mid }')
   width_desc=$(width_to_desc "$width_ms")
 
+  # Profilo tonale FC indipendente dal livello relativo della voce. Le quattro
+  # bande sono euristiche: se anche una sola non e' valida si torna a NORMAL.
+  local presence_index="N/A" sibilance_index="N/A" fc_mid_index="N/A"
+  local fc_profile="NORMAL" fc_profile_confidence="bassa"
+  local fc_profile_reason="fallback: metrica FC non valida"
+  local fc_profile_raw
+  if is_finite_db "$fc_body" && is_finite_db "$fc_mid" && \
+     is_finite_db "$fc_presence" && is_finite_db "$fc_sibilance"; then
+    presence_index=$(awk -v p="$fc_presence" -v b="$fc_body" 'BEGIN { printf "%.1f", p-b }')
+    sibilance_index=$(awk -v s="$fc_sibilance" -v p="$fc_presence" 'BEGIN { printf "%.1f", s-p }')
+    fc_mid_index=$(awk -v m="$fc_mid" -v b="$fc_body" 'BEGIN { printf "%.1f", m-b }')
+    fc_profile_raw=$(classify_fc_profile "$presence_index" "$sibilance_index" "$fc_mid_index")
+    IFS='|' read -r fc_profile fc_profile_confidence fc_profile_reason <<<"$fc_profile_raw"
+  fi
+
+  local sur_profile="MIXED" sur_profile_confidence="bassa"
+  local sur_profile_reason="fallback: metriche transienti non valide"
+  local sur_profile_raw
+  sur_profile_raw=$(classify_sur_profile "$sur_active_windows" "$crest_p50" "$crest_p95" "$tail95" "$hot22")
+  IFS='|' read -r sur_profile sur_profile_confidence sur_profile_reason <<<"$sur_profile_raw"
+
   # Override di sicurezza: tracce surround assenti o fortemente sbilanciate non
   # sono materiale adatto a una scelta spaziale automatica.
   local forced_preset=0 preset_raw
@@ -753,10 +1011,10 @@ scan_delta() {
     forced_preset=1
     preset_raw="VOICE|\033[1;33m|bassa|CHECK|sbilanciamento SL/SR"
   else
-    preset_raw=$(classify_preset_v6 "$delta_sur" "$delta_fc" "$delta_voice" "$voice_mask" "$width_ms")
+    preset_raw=$(classify_spatial_preset "$delta_sur" "$delta_fc" "$delta_voice" "$voice_mask" "$width_ms")
   fi
 
-  # Loudness integrata e LRA sono gia' state misurate insieme al sample peak.
+  # Loudness integrata, LRA e picco sono gia' stati misurati nel ramo PASS A.
   local volamp_raw volamp volamp_desc volume_status volamp_note
   volamp_raw=$(loudness_to_volamp "$i_full")
   volamp=$(cap_volamp_by_lra "$volamp_raw" "$lra_full")
@@ -780,6 +1038,27 @@ scan_delta() {
   GLOBAL_METRIC_FILES+=("$(basename "$f")")
   GLOBAL_METRIC_PATHS+=("$f")
   GLOBAL_LOUDNESS_VALUES+=("${i_full:-N/A}")
+  GLOBAL_INPUT_PEAK_VALUES+=("${input_peak_full:-N/A}")
+  GLOBAL_FC_BODY_VALUES+=("${fc_body:-N/A}")
+  GLOBAL_FC_MID_VALUES+=("${fc_mid:-N/A}")
+  GLOBAL_FC_PRESENCE_VALUES+=("${fc_presence:-N/A}")
+  GLOBAL_FC_SIBILANCE_VALUES+=("${fc_sibilance:-N/A}")
+  GLOBAL_PRESENCE_INDEX_VALUES+=("$presence_index")
+  GLOBAL_SIBILANCE_INDEX_VALUES+=("$sibilance_index")
+  GLOBAL_FC_PROFILE_VALUES+=("$fc_profile")
+  GLOBAL_FC_CONFIDENCE_VALUES+=("$fc_profile_confidence")
+  GLOBAL_SUR_ACTIVE_VALUES+=("${sur_active_windows:-0}/${sur_total_windows:-0}")
+  GLOBAL_CREST_P50_VALUES+=("${crest_p50:-N/A}")
+  GLOBAL_CREST_P90_VALUES+=("${crest_p90:-N/A}")
+  GLOBAL_CREST_P95_VALUES+=("${crest_p95:-N/A}")
+  GLOBAL_CREST_P99_VALUES+=("${crest_p99:-N/A}")
+  GLOBAL_CREST_MAX_VALUES+=("${crest_max:-N/A}")
+  GLOBAL_TAIL95_VALUES+=("${tail95:-N/A}")
+  GLOBAL_TAIL99_VALUES+=("${tail99:-N/A}")
+  GLOBAL_HOT22_VALUES+=("${hot22:-0.0}")
+  GLOBAL_HOT25_VALUES+=("${hot25:-0.0}")
+  GLOBAL_SUR_PROFILE_VALUES+=("$sur_profile")
+  GLOBAL_SUR_CONFIDENCE_VALUES+=("$sur_profile_confidence")
   GLOBAL_VOLAMP_VALUES+=("$volamp")
   GLOBAL_WIDTH_VALUES+=("${width_ms:-N/A}")
   GLOBAL_LRA_VALUES+=("${lra_full:-N/A}")
@@ -805,6 +1084,22 @@ scan_delta() {
   echo -e "  \033[1;36mWidth MS: \033[0m  ${width_ms} dB  (${width_desc}; SIDE - MID SL/SR)"
   echo -e "  \033[1;33mI(full):  \033[0m  ${i_full:-N/A} LUFS"
   echo -e "  \033[1;33mLRA:      \033[0m  ${lra_full:-N/A} LU  (solo cap volamp)"
+  printf "  \033[1;33m%-11s\033[0m %s dBFS  (diagnostica; non seleziona il preset)\n" \
+    "Sample Peak:" "$input_peak_full"
+  echo -e "  \033[1;35mFC Body:      \033[0m ${fc_body:-N/A} dBFS  (250-800 Hz)"
+  echo -e "  \033[1;35mFC Mid:       \033[0m ${fc_mid:-N/A} dBFS  (800-1600 Hz)"
+  echo -e "  \033[1;35mFC Presence:  \033[0m ${fc_presence:-N/A} dBFS  (1600-4000 Hz)"
+  echo -e "  \033[1;35mFC Sibilance: \033[0m ${fc_sibilance:-N/A} dBFS  (5000-9000 Hz; euristica)"
+  echo -e "  \033[1;35mPresenceIndex:\033[0m ${presence_index} dB  (FC Presence - FC Body)"
+  echo -e "  \033[1;35mSibilanceIdx: \033[0m ${sibilance_index} dB  (FC Sibilance - FC Presence)"
+  echo -e "  \033[1;35mFC Profile:   \033[0m ${fc_profile}  (confidenza ${fc_profile_confidence}; ${fc_profile_reason})"
+  echo -e "  \033[1;34mSur Windows:  \033[0m ${sur_active_windows:-0}/${sur_total_windows:-0} attive  (gate ${WINDOW_ACTIVITY_GATE} dBFS)"
+  echo -e "  \033[1;34mCrest P50/P90:\033[0m ${crest_p50:-N/A} / ${crest_p90:-N/A} dB"
+  echo -e "  \033[1;34mCrest P95/P99:\033[0m ${crest_p95:-N/A} / ${crest_p99:-N/A} dB"
+  echo -e "  \033[1;34mCrest Max:    \033[0m ${crest_max:-N/A} dB  (solo diagnostico)"
+  echo -e "  \033[1;34mTail95/Tail99:\033[0m ${tail95:-N/A} / ${tail99:-N/A} dB"
+  echo -e "  \033[1;34mHot22/Hot25:  \033[0m ${hot22:-0.0}% / ${hot25:-0.0}%"
+  echo -e "  \033[1;34mSur Profile:  \033[0m ${sur_profile}  (confidenza ${sur_profile_confidence}; ${sur_profile_reason})"
   echo -e "  \033[1;37mPreset:   \033[0m  ${p_color}${preset}\033[0m  (${preset_reason})"
   echo -e "  \033[1;37mConfid.:  \033[0m  ${confidence}  | alternativa: ${alternative}"
   echo -e "  \033[1;37mVolume:   \033[0m  \033[1;36m${volume_status}\033[0m"
@@ -933,7 +1228,7 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
   if [[ "$CREATE_RUN" == "si" ]]; then
     {
       echo '#!/usr/bin/env bash'
-      echo "# ── Batch generato da audio_analyzer (V6 RMS + VOICE BAND) ──"
+      echo "# ── Batch Clearvoice: analisi FC + dinamica surround ──"
       echo "# Data: $(date '+%Y-%m-%d %H:%M')"
       echo "# Metrica: DeltaSur + DeltaFC + VoiceDelta + VoiceMask + Balance + Width | preset sempre per-file"
       echo '#'
@@ -966,6 +1261,27 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
         file_preset_lower="${file_preset,,}"
         file_volamp="${GLOBAL_VOLAMP_VALUES[$i]:-0}"
         file_loudness="${GLOBAL_LOUDNESS_VALUES[$i]:-N/A}"
+        file_input_peak="${GLOBAL_INPUT_PEAK_VALUES[$i]:-N/A}"
+        file_fc_body="${GLOBAL_FC_BODY_VALUES[$i]:-N/A}"
+        file_fc_mid="${GLOBAL_FC_MID_VALUES[$i]:-N/A}"
+        file_fc_presence="${GLOBAL_FC_PRESENCE_VALUES[$i]:-N/A}"
+        file_fc_sibilance="${GLOBAL_FC_SIBILANCE_VALUES[$i]:-N/A}"
+        file_presence_index="${GLOBAL_PRESENCE_INDEX_VALUES[$i]:-N/A}"
+        file_sibilance_index="${GLOBAL_SIBILANCE_INDEX_VALUES[$i]:-N/A}"
+        file_fc_profile="${GLOBAL_FC_PROFILE_VALUES[$i]:-NORMAL}"
+        file_fc_confidence="${GLOBAL_FC_CONFIDENCE_VALUES[$i]:-bassa}"
+        file_sur_active="${GLOBAL_SUR_ACTIVE_VALUES[$i]:-0/0}"
+        file_crest_p50="${GLOBAL_CREST_P50_VALUES[$i]:-N/A}"
+        file_crest_p90="${GLOBAL_CREST_P90_VALUES[$i]:-N/A}"
+        file_crest_p95="${GLOBAL_CREST_P95_VALUES[$i]:-N/A}"
+        file_crest_p99="${GLOBAL_CREST_P99_VALUES[$i]:-N/A}"
+        file_crest_max="${GLOBAL_CREST_MAX_VALUES[$i]:-N/A}"
+        file_tail95="${GLOBAL_TAIL95_VALUES[$i]:-N/A}"
+        file_tail99="${GLOBAL_TAIL99_VALUES[$i]:-N/A}"
+        file_hot22="${GLOBAL_HOT22_VALUES[$i]:-0.0}"
+        file_hot25="${GLOBAL_HOT25_VALUES[$i]:-0.0}"
+        file_sur_profile="${GLOBAL_SUR_PROFILE_VALUES[$i]:-MIXED}"
+        file_sur_confidence="${GLOBAL_SUR_CONFIDENCE_VALUES[$i]:-bassa}"
         file_width="${GLOBAL_WIDTH_VALUES[$i]:-N/A}"
         file_lra="${GLOBAL_LRA_VALUES[$i]:-N/A}"
         file_delta_fc="${GLOBAL_CENTER_DELTA_VALUES[$i]:-N/A}"
@@ -977,10 +1293,13 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
         escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
   
         # Il commento conserva le metriche, la confidenza e l'alternativa.
-        printf '"$PROC" "$CODEC" "$KEEP" "$BITRATE" %s %s %s  # DeltaSur=%s dB | DeltaFC=%s dB | VoiceDelta=%s dB | VoiceMask=%s dB | Balance=%s dB | Width=%s dB | conf=%s alt=%s | I=%s LUFS LRA=%s LU\n' \
-          "$file_preset_lower" "$file_volamp" "$escaped_path" "${GLOBAL_METRIC_VALUES[$i]}" \
+        printf 'FC_PROFILE=%s SUR_PROFILE=%s "$PROC" "$CODEC" "$KEEP" "$BITRATE" %s %s %s  # DeltaSur=%s dB | DeltaFC=%s dB | VoiceDelta=%s dB | VoiceMask=%s dB | Balance=%s dB | Width=%s dB | conf=%s alt=%s | I=%s LUFS LRA=%s LU SamplePeak=%s dBFS | FCBody=%s FCMid=%s FCPresence=%s FCSibilance=%s dBFS | PresenceIndex=%s dB SibilanceIndex=%s dB FCconf=%s | SurWindows=%s CrestP50=%s P90=%s P95=%s P99=%s Max=%s Tail95=%s Tail99=%s Hot22=%s%% Hot25=%s%% SurConf=%s\n' \
+          "${file_fc_profile,,}" "${file_sur_profile,,}" "$file_preset_lower" "$file_volamp" "$escaped_path" "${GLOBAL_METRIC_VALUES[$i]}" \
           "$file_delta_fc" "$file_delta_voice" "$file_voice_mask" "$file_balance" "$file_width" "$file_confidence" "$file_alternative" \
-          "$file_loudness" "$file_lra"
+          "$file_loudness" "$file_lra" "$file_input_peak" "$file_fc_body" "$file_fc_mid" "$file_fc_presence" "$file_fc_sibilance" \
+          "$file_presence_index" "$file_sibilance_index" "$file_fc_confidence" "$file_sur_active" \
+          "$file_crest_p50" "$file_crest_p90" "$file_crest_p95" "$file_crest_p99" "$file_crest_max" \
+          "$file_tail95" "$file_tail99" "$file_hot22" "$file_hot25" "$file_sur_confidence"
       done
   
       echo ''

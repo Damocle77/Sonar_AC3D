@@ -2,7 +2,7 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────────╮
-# │   aegis_sonar_wide_aura_voice_volamp_psycho.sh - Agosto 2026                     │
+# │   aegis_sonar_wide_aura_voice_volamp_psycho.sh - Settembre 2026                  │
 # │   By Sandro (D@mocle77) Sabbioni                                                 │
 # │                                                                                  │
 # │   Motore di processing audio offline per tracce 5.1 (EAC3/AC3).                  │
@@ -45,6 +45,13 @@ VERIFY_MAX_OVERALL_DROP_DB="18.0"
 VERIFY_MAX_MAIN_CHANNEL_DROP_DB="24.0"
 VERIFY_MAX_LFE_DROP_DB="36.0"
 VERIFY_MIN_SAMPLE_RATIO="0.98"
+
+# Peak catcher locali e safety limiter globale. Questi valori iniziali richiedono
+# validazione A/B sul corpus: non rappresentano ancora una calibrazione definitiva.
+FC_LIMITER_OPTS="limit=0.94:attack=1.5:release=60:level=0:latency=1"
+MASTER_LIMITER_OPTS="limit=0.94:attack=2.5:release=50:level=0:latency=1"
+# Ceiling QC provvisorio post-codec: calibrare sul golden corpus AC3/EAC3.
+VERIFY_MAX_TRUE_PEAK_DB="-0.1"
 
 # FRONT_EQ: equalizzatore frontale condiviso, adattato a torri audio 3 vie.
 FRONT_EQ="equalizer=f=320:t=q:w=1.1:g=-0.8,equalizer=f=5000:t=q:w=1.4:g=0.4,highshelf=f=11000:t=q:w=0.7:g=0.4"
@@ -189,6 +196,43 @@ fi
 # Se il preset non è stato specificato, uso il default sonar. Se è stato specificato, deve essere uno dei nomi validi (controllo fatto più avanti).
 SUR_MODE="${SUR_MODE:-sonar}"
 
+# Profilo tonale FC passato opzionalmente dall'analizzatore come variabile
+# d'ambiente. NORMAL conserva esattamente la curva voce preesistente.
+FC_PROFILE="${FC_PROFILE:-normal}"
+FC_PROFILE="${FC_PROFILE,,}"
+case "$FC_PROFILE" in
+  dark|normal|bright|sibilant) ;;
+  *)
+    warn "FC_PROFILE '$FC_PROFILE' non valido: uso NORMAL."
+    FC_PROFILE="normal"
+    ;;
+esac
+
+# Profilo temporale surround passato opzionalmente dall'analizzatore. MIXED e'
+# il fallback prudenziale; i coefficienti iniziali richiedono ascolto sul corpus.
+SUR_PROFILE="${SUR_PROFILE:-mixed}"
+SUR_PROFILE="${SUR_PROFILE,,}"
+case "$SUR_PROFILE" in
+  ambient)
+    SUR_DELAY_SCALE="1.00"
+    SUR_LATE_SCALE="1.00"
+    ;;
+  mixed)
+    SUR_DELAY_SCALE="0.90"
+    SUR_LATE_SCALE="0.85"
+    ;;
+  transient)
+    SUR_DELAY_SCALE="0.70"
+    SUR_LATE_SCALE="0.55"
+    ;;
+  *)
+    warn "SUR_PROFILE '$SUR_PROFILE' non valido: uso MIXED."
+    SUR_PROFILE="mixed"
+    SUR_DELAY_SCALE="0.90"
+    SUR_LATE_SCALE="0.85"
+    ;;
+esac
+
 # Controllo preset: deve essere uno dei nomi validi.
 case "$SUR_MODE" in
   aegis|sonar|wide|aura|voice) ;;
@@ -267,11 +311,6 @@ if awk -v v="$VOLAMP_DB" 'BEGIN { exit !(v > 4.5) }'; then
   warn "volamp alto (${VOLAMP_DB} dB): controlla eventuale compressione percepita nei picchi."
 fi
 
-# Resampling finale HQ con SoX Resampler / SOXR. Precisione 28 bit.
-# 192k upsample: cutoff ininfluente (no contenuto sopra 24 kHz). 48k downsample: cutoff=0.91 per meno pre-ring.
-ARESAMPLE_192K="aresample=192000:resampler=soxr:precision=28"
-ARESAMPLE_48K="aresample=48000:resampler=soxr:precision=28:cutoff=0.91"
-
 # Descrizioni preset per log: non sono parte del processing, ma aiutano a capire cosa fa ogni preset senza dover leggere il codice.
 case "$SUR_MODE" in
   aegis) DESC="Simula NEURAL:X (DTS:X) | Cupola Sonora" ;;
@@ -284,6 +323,8 @@ esac
 # Log dei parametri finali: utile per confermare cosa è stato interpretato dallo script, soprattutto con parsing flessibile.
 info "Codec output:   $OUT_CODEC"
 info "Surround mode:  $SUR_MODE ($DESC)"
+info "FC profile:     ${FC_PROFILE^^} (content-aware conservativo)"
+info "Sur profile:    ${SUR_PROFILE^^} (delay x${SUR_DELAY_SCALE}, late gain x${SUR_LATE_SCALE})"
 info "Bitrate Target: $BITRATE"
 info "Final volamp:   $VOLAMP_LABEL"
 
@@ -361,10 +402,37 @@ fi
 # BLOCCHI VOCE
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
+scale_sur_delay() {
+  awk -v value="$1" -v scale="$SUR_DELAY_SCALE" 'BEGIN { printf "%.0f", value*scale }'
+}
+
+scale_sur_gain() {
+  awk -v value="$1" -v scale="$SUR_LATE_SCALE" 'BEGIN { printf "%.3f", value*scale }'
+}
+
 # Equalizzazione sartioriale della voce per preset surround, con EQ mirato per intelligibilità mantenendo la dinamica naturale. Serve a dare presenza alla voce senza rubare scena ai frontali.
 read -r -d '' VOICE_EQ_BASE <<'EOF' || true
-[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.2,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_pre];
+[FC]highpass=f=40:t=q:w=0.707,equalizer=f=150:t=q:w=1.1:g=0.2,equalizer=f=450:t=q:w=1.2:g=-0.6,equalizer=f=1100:t=q:w=1.4:g=0.8,equalizer=f=7200:t=q:w=2.5:g=-0.9[FC_tone];
 EOF
+
+# Correzioni tonali molto contenute. BRIGHT/SIBILANT riducono soprattutto
+# il boost successivo; nessun de-esser o compressore dinamico permanente.
+set_fc_tonal_profile() {
+  case "$FC_PROFILE" in
+    dark)
+      VOICE_TONAL_BLOCK='[FC_tone]equalizer=f=2450:t=q:w=1.3:g=0.35,equalizer=f=3800:t=q:w=2.0:g=0.20[FC_pre];'
+      ;;
+    bright)
+      VOICE_TONAL_BLOCK='[FC_tone]equalizer=f=2450:t=q:w=1.3:g=-0.35,equalizer=f=3800:t=q:w=2.0:g=-0.25[FC_pre];'
+      ;;
+    sibilant)
+      VOICE_TONAL_BLOCK='[FC_tone]equalizer=f=3800:t=q:w=2.0:g=-0.45,equalizer=f=6000:t=q:w=2.2:g=-0.35[FC_pre];'
+      ;;
+    *)
+      VOICE_TONAL_BLOCK='[FC_tone]anull[FC_pre];'
+      ;;
+  esac
+}
 read -r -d '' VOICE_DELTA_SONAR <<'EOF' || true
 [FC_pre]volume=2.7dB,equalizer=f=1650:t=q:w=1.6:g=0.9,equalizer=f=2450:t=q:w=1.3:g=1.6,equalizer=f=3800:t=q:w=2.0:g=1.0,equalizer=f=6800:t=q:w=2.0:g=-1.0,volume=0.96[FCv];
 EOF
@@ -386,60 +454,60 @@ EOF
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 # SONAR: cupola sonora con boost verticale, più presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
-read -r -d '' SUR_FILTERS_SONAR <<'EOF' || true
+read -r -d '' SUR_FILTERS_SONAR <<EOF || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
 [SLd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SLd];
-[SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
-[SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
-[SLlate_in]adelay=38,highpass=f=150,lowpass=f=1500,volume=0.58[SLlate];
+[SLp_in]adelay=$(scale_sur_delay 18),highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SLp];
+[SLh_in]adelay=$(scale_sur_delay 32),highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SLh];
+[SLlate_in]adelay=$(scale_sur_delay 38),highpass=f=150,lowpass=f=1500,volume=$(scale_sur_gain 0.58)[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
 [SRd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SRd];
-[SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
-[SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
-[SRlate_in]adelay=41,highpass=f=150,lowpass=f=1500,volume=0.58[SRlate];
+[SRp_in]adelay=$(scale_sur_delay 18),highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=2.0,equalizer=f=11000:t=q:w=1.0:g=-1.2,volume=1.00[SRp];
+[SRh_in]adelay=$(scale_sur_delay 32),highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=2.5:g=0.8,equalizer=f=11000:t=q:w=1.2:g=1.0,volume=0.60[SRh];
+[SRlate_in]adelay=$(scale_sur_delay 41),highpass=f=150,lowpass=f=1500,volume=$(scale_sur_gain 0.58)[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1 0.6 0.4 0.2':normalize=0,volume=1.05[SR_out];
 EOF
 
 # AEGIS: cupola sonora con boost più bilanciato e meno artificiale, più presenza medio-alta per SL/SR, e un layer di decorrelazione a basso livello per aria.
-read -r -d '' SUR_FILTERS_AEGIS <<'EOF' || true
+read -r -d '' SUR_FILTERS_AEGIS <<EOF || true
 [SL]asplit=4[SLd_in][SLp_in][SLh_in][SLlate_in];
 [SLd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SLd];
-[SLp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
-[SLh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
-[SLlate_in]adelay=39,highpass=f=150,lowpass=f=1300,volume=0.42[SLlate];
+[SLp_in]adelay=$(scale_sur_delay 18),highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SLp];
+[SLh_in]adelay=$(scale_sur_delay 32),highpass=f=2500,lowpass=f=14000,allpass=f=900:t=q:w=0.70,allpass=f=2200:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SLh];
+[SLlate_in]adelay=$(scale_sur_delay 39),highpass=f=150,lowpass=f=1300,volume=$(scale_sur_gain 0.42)[SLlate];
 [SLd][SLp][SLh][SLlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SL_out];
 [SR]asplit=4[SRd_in][SRp_in][SRh_in][SRlate_in];
 [SRd_in]adelay=0,highpass=f=40:t=q:w=0.707,volume=0.95[SRd];
-[SRp_in]adelay=18,highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
-[SRh_in]adelay=32,highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
-[SRlate_in]adelay=42,highpass=f=150,lowpass=f=1300,volume=0.42[SRlate];
+[SRp_in]adelay=$(scale_sur_delay 18),highpass=f=1500,equalizer=f=6500:t=q:w=1.2:g=1.6,equalizer=f=11000:t=q:w=1.0:g=-1.4,volume=0.95[SRp];
+[SRh_in]adelay=$(scale_sur_delay 32),highpass=f=2500,lowpass=f=14000,allpass=f=1050:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,equalizer=f=8000:t=q:w=3.0:g=-4.0,equalizer=f=11000:t=q:w=1.2:g=0.6,volume=0.48[SRh];
+[SRlate_in]adelay=$(scale_sur_delay 42),highpass=f=150,lowpass=f=1300,volume=$(scale_sur_gain 0.42)[SRlate];
 [SRd][SRp][SRh][SRlate]amix=inputs=4:weights='1.05 0.80 0.70 0.45':normalize=0,volume=0.95[SR_out];
 EOF
 
 # WIDE: allargamento laterale più marcato, con boost più evidente sulle sub-bande filtrate, e un layer di decorrelazione a basso livello per aria.
-read -r -d '' SUR_FILTERS_WIDE <<'EOF' || true
+read -r -d '' SUR_FILTERS_WIDE <<EOF || true
 [SL]asplit=3[SLd_in][SLe_in][SLx_in];
-[SLd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SLd];
-[SLe_in]adelay=9,highpass=f=280,lowpass=f=7000,allpass=f=1200:t=q:w=0.65,volume=0.42[SLe];
-[SLx_in]adelay=22,highpass=f=600,lowpass=f=5000,allpass=f=700:t=q:w=0.70,allpass=f=2600:t=q:w=0.70,volume=0.17[SLx];
+[SLd_in]adelay=$(scale_sur_delay 1),highpass=f=40:t=q:w=0.707,volume=1.00[SLd];
+[SLe_in]adelay=$(scale_sur_delay 9),highpass=f=280,lowpass=f=7000,allpass=f=1200:t=q:w=0.65,volume=0.42[SLe];
+[SLx_in]adelay=$(scale_sur_delay 22),highpass=f=600,lowpass=f=5000,allpass=f=700:t=q:w=0.70,allpass=f=2600:t=q:w=0.70,volume=$(scale_sur_gain 0.17)[SLx];
 [SLd][SLe][SLx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SL_out];
 [SR]asplit=3[SRd_in][SRe_in][SRx_in];
-[SRd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SRd];
-[SRe_in]adelay=10,highpass=f=280,lowpass=f=7000,allpass=f=1350:t=q:w=0.65,volume=0.42[SRe];
-[SRx_in]adelay=24,highpass=f=600,lowpass=f=5000,allpass=f=820:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,volume=0.17[SRx];
+[SRd_in]adelay=$(scale_sur_delay 1),highpass=f=40:t=q:w=0.707,volume=1.00[SRd];
+[SRe_in]adelay=$(scale_sur_delay 10),highpass=f=280,lowpass=f=7000,allpass=f=1350:t=q:w=0.65,volume=0.42[SRe];
+[SRx_in]adelay=$(scale_sur_delay 24),highpass=f=600,lowpass=f=5000,allpass=f=820:t=q:w=0.70,allpass=f=2400:t=q:w=0.70,volume=$(scale_sur_gain 0.17)[SRx];
 [SRd][SRe][SRx]amix=inputs=3:weights='1.00 0.90 0.80':normalize=0,lowshelf=f=250:g=0.5:t=q:w=0.7,highshelf=f=3500:g=0.1:t=q:w=0.8,volume=1.00[SR_out];
 EOF
 
 # AURA: allargamento posteriore. Due layer (diretto + allpass decorrelato), presenza medio-alta contenuta. Il più morbido tra i preset spaziali.
-read -r -d '' SUR_FILTERS_AURA <<'EOF' || true
+read -r -d '' SUR_FILTERS_AURA <<EOF || true
 [SL]asplit=2[SLd_in][SLa_in];
-[SLd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SLd];
-[SLa_in]adelay=8,highpass=f=800,lowpass=f=4500,allpass=f=1400:t=q:w=0.65,volume=0.22[SLa];
+[SLd_in]adelay=$(scale_sur_delay 1),highpass=f=40:t=q:w=0.707,volume=1.00[SLd];
+[SLa_in]adelay=$(scale_sur_delay 8),highpass=f=800,lowpass=f=4500,allpass=f=1400:t=q:w=0.65,volume=$(scale_sur_gain 0.22)[SLa];
 [SLd][SLa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SL_out];
 [SR]asplit=2[SRd_in][SRa_in];
-[SRd_in]adelay=1,highpass=f=40:t=q:w=0.707,volume=1.00[SRd];
-[SRa_in]adelay=9,highpass=f=800,lowpass=f=4500,allpass=f=1550:t=q:w=0.65,volume=0.22[SRa];
+[SRd_in]adelay=$(scale_sur_delay 1),highpass=f=40:t=q:w=0.707,volume=1.00[SRd];
+[SRa_in]adelay=$(scale_sur_delay 9),highpass=f=800,lowpass=f=4500,allpass=f=1550:t=q:w=0.65,volume=$(scale_sur_gain 0.22)[SRa];
 [SRd][SRa]amix=inputs=2:weights='1.00 0.85':normalize=0,volume=0.95[SR_out];
 EOF
 
@@ -453,42 +521,39 @@ EOF
 # PROFILI PRESET
 # ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-# Funzione per impostare i blocchi di processing in base al preset selezionato. Ogni preset ha un set specifico di filtri, guadagni e opzioni del limiter.
+# Funzione per impostare i blocchi di processing in base al preset selezionato.
+# I limiter sono configurazioni globali indipendenti dal preset.
 set_preset_profile() {
+  set_fc_tonal_profile
   case "$SUR_MODE" in
     sonar)
       SUR_BLOCK="$SUR_FILTERS_SONAR"
-      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_SONAR}"
+      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_TONAL_BLOCK}${VOICE_DELTA_SONAR}"
       DECORR_GAIN="$DECORR_GAIN_SONAR"
-      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="Sonar (Atmos Like)"
       ;;
     aegis)
       SUR_BLOCK="$SUR_FILTERS_AEGIS"
-      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AEGIS}"
+      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_TONAL_BLOCK}${VOICE_DELTA_AEGIS}"
       DECORR_GAIN="$DECORR_GAIN_AEGIS"
-      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="AEGIS (Neural:X Like)"
       ;;
     aura)
       SUR_BLOCK="$SUR_FILTERS_AURA"
-      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_AURA}"
+      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_TONAL_BLOCK}${VOICE_DELTA_AURA}"
       DECORR_GAIN="$DECORR_GAIN_AURA"
-      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="AURA (Dolby 6.1 Like)"
       ;;
     wide)
       SUR_BLOCK="$SUR_FILTERS_WIDE"
-      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_WIDE}"
+      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_TONAL_BLOCK}${VOICE_DELTA_WIDE}"
       DECORR_GAIN="$DECORR_GAIN_WIDE"
-      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="Wide (7.1 Like)"
       ;;
     voice)
       SUR_BLOCK="$SUR_FILTERS_VOICEONLY"
-      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_DELTA_VOICEONLY}"
+      VOICE_BLOCK="${VOICE_EQ_BASE}${VOICE_TONAL_BLOCK}${VOICE_DELTA_VOICEONLY}"
       DECORR_GAIN="$DECORR_GAIN_VOICE"
-      LIMITER_OPTS="limit=0.985:attack=2.5:release=50:level=1:latency=1"
       MODE_TITLE="VOICE (Dialogue Plus)"
       ;;
     *)
@@ -496,6 +561,7 @@ set_preset_profile() {
       exit 1
       ;;
   esac
+  DECORR_GAIN="$(scale_sur_gain "$DECORR_GAIN")"
 }
 
 # Funzione per costruire il blocco di split dei canali in ingresso con mapping posizionale.
@@ -511,6 +577,9 @@ EOF
 
 # Il blocco di processing surround psicoacustico: se DECORR_GAIN è 0, salto completamente la decorrelazione.
 build_surround_psycho_graph() {
+  local air_sl_delay air_sr_delay
+  air_sl_delay=$(scale_sur_delay 12)
+  air_sr_delay=$(scale_sur_delay 15)
   if [[ "${DECORR_GAIN:-0}" = "0" ]]; then
     cat <<EOF
 [SL_out]anull[SL_final];
@@ -519,10 +588,10 @@ EOF
   else
     cat <<EOF
 [SL_out]asplit=2[SL_main][SL_air_in];
-[SL_air_in]highpass=f=1600,lowpass=f=9500,adelay=12,allpass=f=1400:t=q:w=0.60,allpass=f=3400:t=q:w=0.65,equalizer=f=7200:t=q:w=2.0:g=-1.0,volume=${DECORR_GAIN}[SL_air];
+[SL_air_in]highpass=f=1600,lowpass=f=9500,adelay=${air_sl_delay},allpass=f=1400:t=q:w=0.60,allpass=f=3400:t=q:w=0.65,equalizer=f=7200:t=q:w=2.0:g=-1.0,volume=${DECORR_GAIN}[SL_air];
 [SL_main][SL_air]amix=inputs=2:weights='1 1':normalize=0[SL_final];
 [SR_out]asplit=2[SR_main][SR_air_in];
-[SR_air_in]highpass=f=1600,lowpass=f=9500,adelay=15,allpass=f=1650:t=q:w=0.60,allpass=f=3150:t=q:w=0.65,equalizer=f=7200:t=q:w=2.0:g=-1.0,volume=${DECORR_GAIN}[SR_air];
+[SR_air_in]highpass=f=1600,lowpass=f=9500,adelay=${air_sr_delay},allpass=f=1650:t=q:w=0.60,allpass=f=3150:t=q:w=0.65,equalizer=f=7200:t=q:w=2.0:g=-1.0,volume=${DECORR_GAIN}[SR_air];
 [SR_main][SR_air]amix=inputs=2:weights='1 1':normalize=0[SR_final];
 EOF
   fi
@@ -531,21 +600,21 @@ EOF
 # Blocco finale di output:
 # - applica il volamp separatamente ai cinque canali principali;
 # - applica il volamp al LFE prima del limiter dedicato;
+# - applica al FC un peak catcher locale dopo EQ e volamp;
 # - il file resta 5.1 con un solo canale LFE; l'eventuale doppio sub (5.2) e' gestito dall'AVR;
 # - unisce i sei canali in 5.1(side);
 # - mantiene il limiter finale come protezione globale;
-# - esegue il true-peak oversampling a 192 kHz e il ritorno a 48 kHz.
-#highshelf=f=12000:g=0.4:w=0.5:c=FL|FR|FC|SL|SR,${ARESAMPLE_192K},alimiter=${LIMITER_OPTS},${ARESAMPLE_48K},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=5.1(side)[aout]
+# La protezione True Peak effettiva viene verificata sul candidato codificato nel PASS C.
 build_output_join_graph() {
   cat <<EOF
 [FLp]${FINAL_GAIN_FILTER}aformat=channel_layouts=mono[FLf];
 [FRp]${FINAL_GAIN_FILTER}aformat=channel_layouts=mono[FRf];
-[FCv]${FINAL_GAIN_FILTER}aformat=channel_layouts=mono[FCf];
+[FCv]${FINAL_GAIN_FILTER}alimiter=${FC_LIMITER_OPTS},aformat=channel_layouts=mono[FCf];
 [LFE]aformat=channel_layouts=mono,highpass=f=32,lowpass=f=110,${FINAL_GAIN_FILTER}alimiter=limit=0.94:attack=2.0:release=120:level=0:latency=1[LFEf];
 [SL_final]${FINAL_GAIN_FILTER}aformat=channel_layouts=mono[SLf];
 [SR_final]${FINAL_GAIN_FILTER}aformat=channel_layouts=mono[SRf];
 [FLf][FRf][FCf][LFEf][SLf][SRf]join=inputs=6:channel_layout=5.1(side):map=0.0-FL|1.0-FR|2.0-FC|3.0-LFE|4.0-SL|5.0-SR,
-highshelf=f=12000:g=0.4:w=0.5:c=FL|FR|FC|SL|SR,alimiter=${LIMITER_OPTS},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=5.1(side)[aout]
+highshelf=f=12000:g=0.4:w=0.5:c=FL|FR|FC|SL|SR,alimiter=${MASTER_LIMITER_OPTS},aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=5.1(side)[aout]
 EOF
 }
 
@@ -561,12 +630,17 @@ build_filter_complex() {
 # Misura in una sola decodifica picco, RMS e numero di campioni, globalmente e per ciascun canale.
 # peak|rms|samples|rms_c0|rms_c1|rms_c2|rms_c3|rms_c4|rms_c5
 measure_audio_signal() {
-  local f="$1" map_spec="$2" probe metrics
+  local f="$1" map_spec="$2" include_true_peak="${3:-0}" probe metrics audio_filter true_peak
+
+  audio_filter="aformat=sample_rates=48000:sample_fmts=fltp,astats=metadata=0:reset=0"
+  if [[ "$include_true_peak" == "1" ]]; then
+    audio_filter+=",ebur128=peak=true:framelog=verbose"
+  fi
 
   probe="$(
     ffmpeg -hide_banner -nostdin -v info -i "$f" \
       -map "$map_spec" -vn -sn -dn \
-      -af "aformat=sample_rates=48000:sample_fmts=fltp,astats=metadata=0:reset=0" \
+      -af "$audio_filter" \
       -f null - 2>&1 || true
   )"
 
@@ -608,11 +682,32 @@ measure_audio_signal() {
   ')" || return 1
 
   [[ -n "$metrics" ]] || return 1
-  printf '%s\n' "$metrics"
+  if [[ "$include_true_peak" == "1" ]]; then
+    true_peak="$(printf '%s\n' "$probe" | measure_true_peak_db)" || return 1
+    printf '%s|%s\n' "$metrics" "$true_peak"
+  else
+    printf '%s\n' "$metrics"
+  fi
 }
 
 is_finite_db() {
   [[ "$1" =~ ^-?[0-9]+([.][0-9]+)?$ ]]
+}
+
+# Estrae esclusivamente il Peak della sezione "True peak" dell'ultimo summary
+# ebur128 ricevuto su stdin. Valori mancanti, NaN e formati inattesi sono errori.
+measure_true_peak_db() {
+  awk '
+    /Summary:/ { in_summary=1; section=""; tp=""; next }
+    !in_summary { next }
+    /^[[:space:]]*True peak:[[:space:]]*$/ { section="true_peak"; next }
+    section == "true_peak" && /^[[:space:]]*Peak:[[:space:]]+/ { tp=$2; next }
+    END {
+      number="^-?[0-9]+([.][0-9]+)?$"
+      if (tp !~ number) exit 1
+      print tp
+    }
+  '
 }
 
 # Confronta l'output codificato con la traccia sorgente selezionata.
@@ -623,23 +718,24 @@ is_finite_db() {
 verify_output_audio_signal() {
   local f="$1" input_metrics="$2" output_metrics
   local -a in_m out_m channel_names=(FL FR FC LFE SL SR)
-  local input_peak input_rms input_samples output_peak output_rms output_samples
+  local input_peak input_rms input_samples output_peak output_rms output_samples output_true_peak
   local i input_channel_rms output_channel_rms max_drop
 
-  output_metrics="$(measure_audio_signal "$f" "0:a:0")" || {
-    VERIFY_REASON="astats non ha restituito metriche complete per l'output"
+  output_metrics="$(measure_audio_signal "$f" "0:a:0" 1)" || {
+    VERIFY_REASON="QC output incompleto: astats o True Peak non misurabile"
     return 2
   }
 
   IFS='|' read -r -a in_m <<<"$input_metrics"
   IFS='|' read -r -a out_m <<<"$output_metrics"
-  [[ ${#in_m[@]} -eq 9 && ${#out_m[@]} -eq 9 ]] || {
+  [[ ${#in_m[@]} -eq 9 && ${#out_m[@]} -eq 10 ]] || {
     VERIFY_REASON="numero di metriche input/output inatteso"
     return 2
   }
 
   input_peak="${in_m[0]}"; input_rms="${in_m[1]}"; input_samples="${in_m[2]}"
   output_peak="${out_m[0]}"; output_rms="${out_m[1]}"; output_samples="${out_m[2]}"
+  output_true_peak="${out_m[9]}"
 
   if [[ "$output_peak" == "-inf" || "$output_rms" == "-inf" ]]; then
     VERIFY_REASON="output digitalmente silenzioso"
@@ -647,9 +743,16 @@ verify_output_audio_signal() {
   fi
   if ! is_finite_db "$input_peak" || ! is_finite_db "$input_rms" || \
      ! is_finite_db "$output_peak" || ! is_finite_db "$output_rms" || \
+     ! is_finite_db "$output_true_peak" || \
      ! [[ "$input_samples" =~ ^[0-9]+([.][0-9]+)?$ && "$output_samples" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     VERIFY_REASON="metriche globali non numeriche"
     return 2
+  fi
+
+  if awk -v tp="$output_true_peak" -v lim="$VERIFY_MAX_TRUE_PEAK_DB" \
+       'BEGIN { exit !(tp > lim) }'; then
+    VERIFY_REASON="True Peak output sopra il ceiling provvisorio: ${output_true_peak} dBTP > ${VERIFY_MAX_TRUE_PEAK_DB} dBTP"
+    return 1
   fi
 
   if awk -v v="$output_peak" -v lim="$VERIFY_SILENCE_PEAK_DB" 'BEGIN { exit !(v <= lim) }'; then
@@ -698,7 +801,7 @@ verify_output_audio_signal() {
     fi
   done
 
-  info "Verifica audio: peak ${input_peak}→${output_peak} dBFS; RMS ${input_rms}→${output_rms} dBFS; campioni ${input_samples}→${output_samples}"
+  info "Verifica audio: peak ${input_peak}→${output_peak} dBFS; True Peak output=${output_true_peak} dBTP (ceiling provvisorio ${VERIFY_MAX_TRUE_PEAK_DB} dBTP); RMS ${input_rms}→${output_rms} dBFS; campioni ${input_samples}→${output_samples}"
   return 0
 }
 

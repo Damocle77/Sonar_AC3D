@@ -2,13 +2,13 @@
   <img src="psico_logo.png" width="700" alt="Sonary Suite Logo">
 </p>
 
-# 🎧 Psychoacoustic Suite - Agosto 2026
+# 🎧 Psychoacoustic Suite - Settembre 2026
 
 Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e trasformare tracce audio stereo, 5.1 ed EAC3 Atmos/JOC in modo offline, ripetibile e controllato.
 
 > Non tutti i supereroi indossano un mantello. Alcuni lanciano `ffmpeg` e salvano i dialoghi dal multiverso del mix sbagliato.
 
-La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier dell'analyzer misura scena full-band, prominenza della voce, mascheramento e width dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
+La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier dell'analyzer misura scena full-band, prominenza e timbro della voce centrale, mascheramento, width e dinamica dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
 
 La taratura 5.1 è pensata per un impianto domestico ibrido con frontali a torre 3 vie, centrale e surround compatti, tutti configurati **Small** con crossover AVR unico intorno a **110 Hz**, uno o due subwoofer attivi gestiti dall'AVR, ascolto medio/basso e priorità all'intelligibilità della voce italiana.
 
@@ -92,8 +92,8 @@ done
 
 | Script | Scopo |
 |---|---|
-| `audio_analyzer_volamp_psycho.sh` | Classifier per 5.1: Delta surround/centro, banda voce, mascheramento, width, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e batch opzionale |
-| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset `aegis`, `sonar`, `wide`, `aura`, `voice`, EQ voce, surround psicoacustici e controllo LFE |
+| `audio_analyzer_volamp_psycho.sh` | Classifier per 5.1: Delta surround/centro, banda e profilo tonale FC, dinamica surround, width, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e batch opzionale |
+| `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset `aegis`, `sonar`, `wide`, `aura`, `voice`, profili FC/surround content-aware, peak catcher FC e controllo LFE |
 | `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 plausibile: matrice L-R, centro assist, LFE minimo, output atomico/verificato e preset `quad` dedicato alla musica |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie/ASMR/VR con BS2B, ITD opzionale, loudnorm post-DSP, LFO e output atomico/verificato |
 | `atmos_to_51_dynaudnorm_psicho.sh` | Prepara un MKV con EAC3 5.1 normalizzata come primaria e traccia Atmos/EAC3 originale copiata come secondaria |
@@ -145,8 +145,11 @@ Le metriche full-band restano dedicate alla scelta del trattamento spaziale.
 ## Caratteristiche
 
 - selezione del 5.1 score-based: lingua italiana e flag default, senza confronto con la durata del container;
-- misura full-band, banda voce e `Width MS` nella stessa decodifica;
-- misura separata di `I(full)`, `LRA` e sample peak con EBU R128;
+- misura full-band, banda voce, `Width MS`, profilo tonale FC, dinamica surround, `I(full)`, `LRA` e Sample Peak in una sola decodifica FFmpeg;
+- avanzamento leggibile ogni 15 secondi, configurabile con `ANALYZER_PROGRESS_INTERVAL`;
+- Sample Peak rapido sulla sorgente; il True Peak viene misurato dove serve, sul candidato già codificato;
+- profilo tonale FC `DARK`, `NORMAL`, `BRIGHT` o `SIBILANT`, con fallback prudenziale a `NORMAL`;
+- profilo temporale surround `AMBIENT`, `MIXED` o `TRANSIENT`, ricavato da finestre attive da 1 secondo;
 - target loudness interno: **`-21.0 LUFS`**;
 - fake-5.1 gate: se i surround sono virtualmente muti, forza `voice`;
 - priorità a `voice` quando il centro è debole o mascherato nella banda 250-5000 Hz;
@@ -235,6 +238,29 @@ Width MS = RMS(SIDE) - RMS(MID)
 | `-7 / -3 dB` | medio |
 | `>= -3 dB` | largo |
 
+## Profili content-aware
+
+Il profilo tonale del centrale è indipendente dal suo livello relativo. L'analyzer misura quattro bande FC e ne confronta i rapporti:
+
+| Banda | Intervallo |
+|---|---:|
+| Body | `250–800 Hz` |
+| Mid | `800–1600 Hz` |
+| Presence | `1600–4000 Hz` |
+| Sibilance | `5000–9000 Hz` |
+
+Da queste misure ricava `PresenceIndex` e `SibilanceIndex`. Le soglie hanno una zona neutra ampia: dati incompleti o ambigui producono `NORMAL`, evitando correzioni arbitrarie.
+
+Per i surround, SL e SR sono analizzati in finestre da un secondo. Le finestre quasi mute vengono escluse; sulle restanti vengono calcolati crest factor combinato, percentili `P50/P90/P95/P99`, code `Tail95/Tail99` e percentuali `Hot22/Hot25`. Il picco massimo resta diagnostico e non decide da solo il profilo:
+
+| Profilo | Interpretazione | Adattamento DSP |
+|---|---|---|
+| `AMBIENT` | energia diffusa e continua | delay e layer tardivi completi |
+| `MIXED` | comportamento intermedio o incerto | delay `×0.90`, layer tardivi `×0.85` |
+| `TRANSIENT` | effetti brevi e crest elevato | delay `×0.70`, layer tardivi `×0.55` |
+
+Servono almeno 10 finestre attive per una decisione affidabile; altrimenti viene usato `MIXED` con confidenza bassa.
+
 ## Volamp automatico
 
 Il volamp è il make-up gain applicato dal processore ai singoli canali prima del join 5.1. Sul canale LFE viene applicato prima del limiter dedicato, così i picchi del sub vengono controllati prima del master limiter multicanale. L'analyzer usa la loudness integrata del file rispetto al target `-21 LUFS`.
@@ -259,7 +285,7 @@ Il minimo automatico resta quindi **4.0 dB**. Il cap LRA non può scendere sotto
 Quando `run=si`, il batch contiene righe simili a:
 
 ```bash
-"$PROC" "$CODEC" "$KEEP" "$BITRATE" sonar 4.5 film.mkv  # DeltaSur=-14.2 dB | DeltaFC=1.0 dB | VoiceDelta=2.3 dB | VoiceMask=-12.0 dB | Width=-4.1 dB | I=-21.9 LUFS
+FC_PROFILE=normal SUR_PROFILE=ambient "$PROC" "$CODEC" "$KEEP" "$BITRATE" sonar 4.5 film.mkv  # DeltaSur=-14.2 dB | DeltaFC=1.0 dB | VoiceDelta=2.3 dB | VoiceMask=-12.0 dB | Width=-4.1 dB | I=-21.9 LUFS
 ```
 
 L'ultimo parametro numerico è il volamp realmente passato al processore. Il batch usa:
@@ -268,7 +294,7 @@ L'ultimo parametro numerico è il volamp realmente passato al processore. Il bat
 PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"
 ```
 
-Il batch usa sempre il preset per-file, derivato da `DeltaSur`, `DeltaFC`, `VoiceDelta`, `VoiceMask`, balance, `Width MS` ed eventuali override di sicurezza. Il P25 di `DeltaSur` è soltanto diagnostico; il verdetto stagionale richiede almeno 2/3 di consenso e non sostituisce mai il preset scritto nelle singole righe del batch.
+Il batch usa sempre il preset per-file, derivato da `DeltaSur`, `DeltaFC`, `VoiceDelta`, `VoiceMask`, balance, `Width MS` ed eventuali override di sicurezza. Passa inoltre al processore `FC_PROFILE` e `SUR_PROFILE`, mantenendo le metriche complete nel commento della riga. Il P25 di `DeltaSur` è soltanto diagnostico; il verdetto stagionale richiede almeno 2/3 di consenso e non sostituisce mai il preset scritto nelle singole righe del batch.
 
 ---
 
@@ -283,7 +309,9 @@ Motore principale per tracce **5.1 esistenti**.
 - selezione stream score-based: entrano solo tracce a 6 canali; lingua italiana `+300`, flag default `+200`; la durata del container non entra nel punteggio;
 - layout gestiti: `5.1`, `5.1(back)`, `5.1(side)`;
 - EQ voce dedicato per ogni preset;
+- profilo tonale FC content-aware con correzioni statiche molto contenute e fallback `NORMAL` neutro;
 - processing surround differenziato per preset;
+- profilo temporale surround che adatta delay e layer tardivi senza compressori o transient shaper;
 - air/decorrelation layer controllato;
 - trattamento LFE: high-pass `32 Hz`, low-pass `110 Hz`, volamp prima del limiter dedicato;
 - diffusori mantenuti `Small`, con bass management e crossover a circa `110 Hz` affidati all'AVR; lo script applica ai canali principali solo un high-pass di sicurezza a `40 Hz`;
@@ -293,6 +321,7 @@ Motore principale per tracce **5.1 esistenti**.
 - video, sottotitoli, capitoli e allegati copiati;
 - keep opzionale della traccia 5.1 selezionata;
 - output scritto come candidato temporaneo e pubblicato solo dopo la verifica comparativa input/output;
+- peak catcher locale sul centrale, limiter master senza auto-level e controllo True Peak post-codec fail-closed;
 - contatori finali ed exit code non zero se almeno un file fallisce.
 
 ## Sintassi
@@ -346,11 +375,22 @@ LFE:
 
 Master:
   high-shelf +0.4 dB @ 12 kHz sui canali non-LFE
-  alimiter limit=0.985, attack=2.5 ms, release=50 ms, level=1, latency=1
+  alimiter limit=0.94, attack=2.5 ms, release=50 ms, level=0, latency=1
   output 48 kHz / fltp / 5.1(side)
 ```
 
-`level=1` nel limiter master abilita il comportamento di auto-level previsto dalla configurazione corrente. Il limiter LFE usa invece `level=0`.
+Il centrale usa inoltre un peak catcher locale con `limit=0.94`, attack `1.5 ms`, release `60 ms`, `level=0`. Tutti i limiter lavorano come protezione dei picchi e non come auto-level.
+
+## Profili ricevuti dall'analyzer
+
+Il batch imposta due variabili d'ambiente per ogni file:
+
+```bash
+FC_PROFILE=normal SUR_PROFILE=mixed \
+  "$PROC" "$CODEC" "$KEEP" "$BITRATE" aegis 4.0 "film.mkv"
+```
+
+`FC_PROFILE` accetta `dark`, `normal`, `bright`, `sibilant`; `SUR_PROFILE` accetta `ambient`, `mixed`, `transient`. Valori mancanti o non validi ricadono rispettivamente su `normal` e `mixed`. Le correzioni FC sono nell'ordine di pochi decimi di dB; il profilo surround modifica soltanto delay, layer tardivi e decorrelazione.
 
 Il file prodotto resta **5.1 con un solo canale LFE**. Un eventuale impianto **5.2** distribuisce il canale `.1` ai due subwoofer tramite l'AVR; lo script non crea due canali LFE separati.
 
@@ -360,6 +400,7 @@ Il processore misura la traccia sorgente, codifica prima un file con suffisso `.
 
 | Controllo | Soglia |
 |---|---:|
+| True Peak post-codec massimo | `-0.1 dBTP` provvisorio |
 | Sample peak output quasi muto | `<= -80 dBFS` |
 | Perdita RMS globale massima | `18 dB` |
 | Rapporto minimo campioni output/input | `0.98` |
@@ -367,7 +408,7 @@ Il processore misura la traccia sorgente, codifica prima un file con suffisso `.
 | Perdita massima FL/FR/FC/SL/SR | `24 dB` |
 | Perdita massima LFE | `36 dB` |
 
-Se la verifica fallisce o non è conclusiva, il comportamento è fail-closed: il file finale non viene toccato e il candidato `.partial` resta disponibile per il debug. Non viene invece confrontata la durata audio con quella del container.
+Se la verifica fallisce o non è conclusiva, compreso un True Peak non misurabile, il comportamento è fail-closed: il file finale non viene toccato e il candidato `.partial` resta disponibile per il debug. Non viene invece confrontata la durata audio con quella del container.
 
 ## Decorrelazione
 
@@ -521,8 +562,8 @@ La scrittura è atomica e fail-closed. Prima del processing viene verificata la 
 ## Output
 
 ```text
-<nome>_UPMIX_5.1_V9_TO51.mkv
-<nome>_UPMIX_5.1_V9_QUAD.mkv
+<nome>_UPMIX_5.1_TO51.mkv
+<nome>_UPMIX_5.1_QUAD.mkv
 ```
 
 La lingua viene propagata sia alla traccia processata sia, quando `keep=si`, alla traccia stereo originale. Lo script mantiene i contatori `OK/FALLITI/SALTATI` e restituisce exit code `1` se almeno un encoding fallisce.
@@ -858,7 +899,7 @@ Stereo
 
 | Script | Costo relativo | Motivo principale |
 |---|---:|---|
-| `audio_analyzer_volamp_psycho.sh` | Medio/Alto | un passaggio EBU R128 e un passaggio RMS multicanale/full-band/voice-band |
+| `audio_analyzer_volamp_psycho.sh` | Medio | una sola decodifica con rami paralleli per EBU R128, RMS, bande FC e finestre surround |
 | `stereo251_upmix_psycho.sh` | Medio | upmix, filtri, SOXR e encoding |
 | `asmr_vr_intimate_psycho.sh` | Medio | loudnorm, BS2B, EQ, ITD/LFO e encoding |
 | `atmos_to_51_dynaudnorm_psicho.sh` | Medio/Alto | decode multicanale, dynaudnorm e re-encode EAC3 |

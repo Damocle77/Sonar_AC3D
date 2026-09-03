@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   atmos_to_51_dynaudnorm_psicho.sh - Agosto 2026                             │
+# │   atmos_to_51_dynaudnorm_psicho.sh - Settembre 2026                          │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Prende un file con traccia EAC3 Atmos (JOC) e produce un MKV con:          │

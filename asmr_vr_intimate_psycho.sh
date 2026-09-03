@@ -2,14 +2,14 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   asmr_vr_intimate_psycho.sh - Luglio 2026                                          │
+# │   asmr_vr_intimate_psycho.sh - Settembre 2026                                      │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Processing binaurale ottimizzato per ASMR / VR / contenuto intimo.         │
 # │   Simula vicinanza della sorgente sonora (20-50cm) con crossfeed BS2B        │
 # │   J.Meier, ITD (Interaural Time Difference) e EQ psicoacustico.              │
 # │                                                                              │
-# │   CHANGELOG V3:                                                              │
+# │   FUNZIONI PRINCIPALI:                                                       │
 # │     - Rimosso set -e (allineato a aegis/analyzer/upmix)                      │
 # │     - Selezione stream score-based (stereo, default, ita)                    │
 # │     - Output atomico e verifica comparativa prima della pubblicazione        │
@@ -268,9 +268,9 @@ ITD_WHISPER="adelay=delays=0|18S:all=0"
 ITD_NEAR="adelay=delays=0|10S:all=0"
 ITD_CENTER=""
 
-# LFO Breathing Effect (V2: tremolo + flanger)
-# V1 usava pan= con sin(t) — non supportato da ffmpeg (pan accetta solo coefficienti statici).
-# V2 usa tremolo (modulazione ampiezza lenta, 0.12 Hz = ~1 respiro ogni 8 sec)
+# LFO Breathing Effect: tremolo + flanger.
+# Il filtro pan accetta coefficienti statici, quindi la modulazione lenta
+# dell'ampiezza usa tremolo (0.12 Hz = circa un respiro ogni 8 secondi).
 # + flanger (micro-modulazione fase per effetto "movimento" della sorgente).
 # Il risultato e' un leggero "respiro" nell'immagine stereo senza artefatti.
 LFO_PART="tremolo=f=0.12:d=0.06,flanger=delay=2:depth=1.5:regen=0:width=40:speed=0.15:shape=sinusoidal:phase=50"
