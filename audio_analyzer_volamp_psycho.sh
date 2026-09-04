@@ -235,6 +235,14 @@ SUR_TRANSIENT_P95_MIN="20.0"
 SUR_HOT22_AMBIENT_MAX="1.0"
 SUR_HOT22_TRANSIENT_MIN="5.0"
 
+# Bias Atmos conservativo. Il tag della traccia originale non forza mai SONAR:
+# amplia soltanto la zona borderline quando il contenuto e' gia' compatibile.
+# AMBIENT: estensione massima di 1.5 dB; MIXED: estensione di 1.0 dB.
+# TRANSIENT non riceve bias. VOICE/WIDE non vengono mai sovrascritti.
+ATMOS_SONAR_AMBIENT_GATE="-11.5"
+ATMOS_SONAR_MIXED_GATE="-12.0"
+ATMOS_ORIGINAL_TITLE="EAC3 Atmos (Original)"
+
 info "Target loudness analitico: ${LOUDNESS_TARGET} LUFS"
 info "Classifier: voice FC/front=${VOICE_DELTA_GATE} dB | voice SUR/FC=${VOICE_MASK_GATE} dB | FC safety=${CENTER_FULL_SAFETY_GATE} dB"
 info "Peak input: Sample Peak rapido; avanzamento ogni ${ANALYZER_PROGRESS_INTERVAL}s"
@@ -265,6 +273,8 @@ GLOBAL_HOT22_VALUES=()
 GLOBAL_HOT25_VALUES=()
 GLOBAL_SUR_PROFILE_VALUES=()
 GLOBAL_SUR_CONFIDENCE_VALUES=()
+GLOBAL_SOURCE_CLASS_VALUES=()
+GLOBAL_SOURCE_BIAS_VALUES=()
 GLOBAL_VOLAMP_VALUES=()
 GLOBAL_WIDTH_VALUES=()
 GLOBAL_LRA_VALUES=()
@@ -379,6 +389,56 @@ pick_best_stream() {
   fi
   # Se non ho trovato stream validi, esco con warning e codice di errore.
   echo "$best_idx $best_ch $best_layout"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────────
+# Rilevamento provenienza Atmos dal tag della traccia originale conservata dal
+# pre-processore atmos_to_51_dynaudnorm_psicho.sh. Il tag e' un hint di provenienza:
+# non dimostra che il bed 5.1 richieda SONAR e non modifica da solo il preset.
+# Output: ATMOS oppure UNKNOWN.
+# ──────────────────────────────────────────────────────────────────────────────────
+detect_source_class() {
+  local f="$1" title
+  while IFS= read -r title; do
+    title="${title//$'\r'/}"
+    if [[ "${title,,}" == "${ATMOS_ORIGINAL_TITLE,,}" ]]; then
+      echo "ATMOS"
+      return 0
+    fi
+  done < <(ffprobe -v error -select_streams a \
+    -show_entries stream_tags=title -of default=nw=1:nk=1 "$f" 2>/dev/null || true)
+
+  echo "UNKNOWN"
+}
+
+# Applica un bias Atmos soltanto a un AURA gia' deciso dal classifier. In questo
+# modo la provenienza Atmos non puo' scavalcare VOICE, WIDE o un SONAR gia' netto.
+# Output invariato: PRESET|COLORE|CONFIDENCE|ALTERNATIVE|REASON
+apply_atmos_sonar_bias() {
+  local preset_raw="$1" source_class="$2" sur_profile="$3" delta_sur="$4"
+  local preset color confidence alternative reason gate=""
+  IFS='|' read -r preset color confidence alternative reason <<<"$preset_raw"
+
+  [[ "$source_class" == "ATMOS" && "$preset" == "AURA" ]] || { printf '%s
+' "$preset_raw"; return; }
+
+  case "$sur_profile" in
+    AMBIENT) gate="$ATMOS_SONAR_AMBIENT_GATE" ;;
+    MIXED)   gate="$ATMOS_SONAR_MIXED_GATE" ;;
+    *)       printf '%s
+' "$preset_raw"; return ;;
+  esac
+
+  if awk -v ds="$delta_sur" -v gate="$gate" 'BEGIN { exit !(ds < gate) }'; then
+    preset="SONAR"
+    color="\033[1;31m"
+    confidence="bassa"
+    alternative="AURA"
+    reason="bias Atmos conservativo: sorgente originale Atmos + surround borderline SONAR (${sur_profile})"
+  fi
+
+  printf '%s|%s|%s|%s|%s
+' "$preset" "$color" "$confidence" "$alternative" "$reason"
 }
 
 # ──────────────────────────────────────────────────────────────────────────────────
@@ -831,10 +891,14 @@ measure_all_rms() {
     rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
     return 1
   }
-  sur_stats=$(measure_surround_transients "$sl_window_log" "$sr_window_log") || {
-    rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
-    return 1
-  }
+  # La transient analysis e' qualitativa: un errore di parsing/statistica non deve
+  # invalidare RMS, loudness, FC profile e scelta preset gia' misurati correttamente.
+  # In caso di errore degrada a metriche non disponibili; classify_sur_profile()
+  # applichera' il fallback prudenziale MIXED con confidenza bassa.
+  if ! sur_stats=$(measure_surround_transients "$sl_window_log" "$sr_window_log"); then
+    warn "Analisi transient surround non disponibile: fallback MIXED." >&2
+    sur_stats="0|0|N/A|N/A|N/A|N/A|N/A|N/A|N/A|0.0|0.0"
+  fi
   rm -f "$log_file" "$progress_file" "$sl_window_log" "$sr_window_log"
 
   echo "${rms_values}|${ebu_values}|${sur_stats}"
@@ -857,6 +921,93 @@ db_floor_for_math() {
   else
     return 1
   fi
+}
+
+sur_activity_desc() {
+  local active="$1" total="$2"
+  if ! [[ "$active" =~ ^[0-9]+$ && "$total" =~ ^[0-9]+$ ]] || (( total <= 0 )); then
+    echo "N/A"; return
+  fi
+  local pct=$(( active * 100 / total ))
+  if (( pct >= 70 )); then echo "ALTA"
+  elif (( pct >= 35 )); then echo "MEDIA"
+  elif (( pct > 0 )); then echo "BASSA"
+  else echo "ASSENTE"
+  fi
+}
+
+crest_typical_desc() {
+  local v="$1"
+  is_finite_db "$v" || { echo "N/A"; return; }
+  if awk -v x="$v" 'BEGIN{exit !(x < 8)}'; then echo "BASSI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 14)}'; then echo "MODERATI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 20)}'; then echo "ELEVATI"
+  else echo "MOLTO ELEVATI"
+  fi
+}
+
+crest_strong_desc() {
+  local v="$1"
+  is_finite_db "$v" || { echo "N/A"; return; }
+  if awk -v x="$v" 'BEGIN{exit !(x < 14)}'; then echo "BASSI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 20)}'; then echo "ELEVATI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 25)}'; then echo "MOLTO ELEVATI"
+  else echo "ESTREMI"
+  fi
+}
+
+crest_rare_desc() {
+  local v="$1"
+  is_finite_db "$v" || { echo "N/A"; return; }
+  if awk -v x="$v" 'BEGIN{exit !(x < 12)}'; then echo "BASSI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 18)}'; then echo "MODERATI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 24)}'; then echo "MOLTO ELEVATI"
+  else echo "ESTREMI"
+  fi
+}
+
+tail_desc() {
+  local v="$1"
+  is_finite_db "$v" || { echo "N/A"; return; }
+  if awk -v x="$v" 'BEGIN{exit !(x <= 5)}'; then echo "STRETTA"
+  elif awk -v x="$v" 'BEGIN{exit !(x <= 9)}'; then echo "MEDIA"
+  else echo "AMPIA"
+  fi
+}
+
+hot_desc() {
+  local v="$1"
+  is_finite_db "$v" || { echo "N/A"; return; }
+  if awk -v x="$v" 'BEGIN{exit !(x <= 1)}'; then echo "ASSENTI/RARI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 5)}'; then echo "RARI"
+  elif awk -v x="$v" 'BEGIN{exit !(x < 12)}'; then echo "FREQUENTI"
+  else echo "MOLTO FREQUENTI"
+  fi
+}
+
+sur_profile_interpretation() {
+  case "$1" in
+    AMBIENT) echo "surround prevalentemente continui/atmosferici; massima spazialita'" ;;
+    TRANSIENT) echo "transienti forti e ricorrenti; priorita' al punch" ;;
+    *) echo "transienti presenti ma non dominanti; compromesso tra spazialita' e punch" ;;
+  esac
+}
+
+sur_processing_desc() {
+  case "$1" in
+    AMBIENT) echo "delay 0% | late 0% | air 0%" ;;
+    TRANSIENT) echo "delay -30% | late -45% | air -25%" ;;
+    *) echo "delay -10% | late -15% | air -10%" ;;
+  esac
+}
+
+fc_intervention_desc() {
+  case "$1" in
+    DARK) echo "lieve recupero della presenza" ;;
+    BRIGHT) echo "lieve contenimento della presenza" ;;
+    SIBILANT) echo "lieve contenimento della coda alta/sibilanza" ;;
+    *) echo "nessuna correzione tonale aggiuntiva" ;;
+  esac
 }
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -883,6 +1034,14 @@ scan_delta() {
     return 1
   fi
   info "Stream selezionato: [$target_stream], ${max_ch} canali, layout ${layout:-unknown}."
+
+  local source_class
+  source_class=$(detect_source_class "$f")
+  if [[ "$source_class" == "ATMOS" ]]; then
+    info "Origine: ATMOS rilevata dal tag della traccia originale; bias SONAR solo borderline."
+  else
+    info "Origine: nessun tag Atmos originale rilevato; classifier standard."
+  fi
 
   # Mapping posizionale robusto, allineato al processore principale: nell'ordine
   # canonico 5.1 c2 e' FC, c4/c5 sono i surround. Non dipende dai nomi del layout.
@@ -1012,6 +1171,7 @@ scan_delta() {
     preset_raw="VOICE|\033[1;33m|bassa|CHECK|sbilanciamento SL/SR"
   else
     preset_raw=$(classify_spatial_preset "$delta_sur" "$delta_fc" "$delta_voice" "$voice_mask" "$width_ms")
+    preset_raw=$(apply_atmos_sonar_bias "$preset_raw" "$source_class" "$sur_profile" "$delta_sur")
   fi
 
   # Loudness integrata, LRA e picco sono gia' stati misurati nel ramo PASS A.
@@ -1025,6 +1185,8 @@ scan_delta() {
 
   local preset p_color confidence alternative preset_reason
   IFS='|' read -r preset p_color confidence alternative preset_reason <<<"$preset_raw"
+  local source_bias_applied="no"
+  [[ "$preset_reason" == "bias Atmos conservativo:"* ]] && source_bias_applied="sonar"
   if (( forced_preset == 0 )) && \
      awk -v b="$balance_sur" -v gate="$SUR_BALANCE_WARN_DB" -v margin="$PRESET_BORDERLINE_MARGIN" \
        'BEGIN { exit !(b < gate && (gate-b) <= margin) }'; then
@@ -1059,6 +1221,8 @@ scan_delta() {
   GLOBAL_HOT25_VALUES+=("${hot25:-0.0}")
   GLOBAL_SUR_PROFILE_VALUES+=("$sur_profile")
   GLOBAL_SUR_CONFIDENCE_VALUES+=("$sur_profile_confidence")
+  GLOBAL_SOURCE_CLASS_VALUES+=("$source_class")
+  GLOBAL_SOURCE_BIAS_VALUES+=("$source_bias_applied")
   GLOBAL_VOLAMP_VALUES+=("$volamp")
   GLOBAL_WIDTH_VALUES+=("${width_ms:-N/A}")
   GLOBAL_LRA_VALUES+=("${lra_full:-N/A}")
@@ -1086,20 +1250,38 @@ scan_delta() {
   echo -e "  \033[1;33mLRA:      \033[0m  ${lra_full:-N/A} LU  (solo cap volamp)"
   printf "  \033[1;33m%-11s\033[0m %s dBFS  (diagnostica; non seleziona il preset)\n" \
     "Sample Peak:" "$input_peak_full"
-  echo -e "  \033[1;35mFC Body:      \033[0m ${fc_body:-N/A} dBFS  (250-800 Hz)"
-  echo -e "  \033[1;35mFC Mid:       \033[0m ${fc_mid:-N/A} dBFS  (800-1600 Hz)"
-  echo -e "  \033[1;35mFC Presence:  \033[0m ${fc_presence:-N/A} dBFS  (1600-4000 Hz)"
-  echo -e "  \033[1;35mFC Sibilance: \033[0m ${fc_sibilance:-N/A} dBFS  (5000-9000 Hz; euristica)"
-  echo -e "  \033[1;35mPresenceIndex:\033[0m ${presence_index} dB  (FC Presence - FC Body)"
-  echo -e "  \033[1;35mSibilanceIdx: \033[0m ${sibilance_index} dB  (FC Sibilance - FC Presence)"
-  echo -e "  \033[1;35mFC Profile:   \033[0m ${fc_profile}  (confidenza ${fc_profile_confidence}; ${fc_profile_reason})"
-  echo -e "  \033[1;34mSur Windows:  \033[0m ${sur_active_windows:-0}/${sur_total_windows:-0} attive  (gate ${WINDOW_ACTIVITY_GATE} dBFS)"
-  echo -e "  \033[1;34mCrest P50/P90:\033[0m ${crest_p50:-N/A} / ${crest_p90:-N/A} dB"
-  echo -e "  \033[1;34mCrest P95/P99:\033[0m ${crest_p95:-N/A} / ${crest_p99:-N/A} dB"
-  echo -e "  \033[1;34mCrest Max:    \033[0m ${crest_max:-N/A} dB  (solo diagnostico)"
-  echo -e "  \033[1;34mTail95/Tail99:\033[0m ${tail95:-N/A} / ${tail99:-N/A} dB"
-  echo -e "  \033[1;34mHot22/Hot25:  \033[0m ${hot22:-0.0}% / ${hot25:-0.0}%"
-  echo -e "  \033[1;34mSur Profile:  \033[0m ${sur_profile}  (confidenza ${sur_profile_confidence}; ${sur_profile_reason})"
+  echo ""
+  echo -e "  \033[1;36mSOURCE\033[0m"
+  if [[ "$source_class" == "ATMOS" ]]; then
+    echo -e "    Origine:       ATMOS — tag '${ATMOS_ORIGINAL_TITLE}' rilevato"
+    if [[ "$source_bias_applied" == "sonar" ]]; then
+      echo -e "    Influenza:     bias SONAR applicato solo in zona borderline"
+    else
+      echo -e "    Influenza:     nessun override; classifier guidato dal contenuto"
+    fi
+  else
+    echo -e "    Origine:       UNKNOWN / standard"
+    echo -e "    Influenza:     nessun bias Atmos"
+  fi
+  echo ""
+  echo -e "  \033[1;35mVOICE TONALITY\033[0m"
+  echo -e "    Profilo:      ${fc_profile} — ${fc_profile_reason}"
+  echo -e "    Intervento:   $(fc_intervention_desc "$fc_profile")"
+  echo -e "    Confidenza:   ${fc_profile_confidence}"
+  echo -e "    Dettagli:     PresenceIndex=${presence_index} dB | SibilanceIdx=${sibilance_index} dB"
+  echo ""
+  echo -e "  \033[1;34mSURROUND DYNAMICS\033[0m"
+  echo -e "    Attivita':          $(sur_activity_desc "${sur_active_windows:-0}" "${sur_total_windows:-0}")"
+  echo -e "    Transienti tipici:  $(crest_typical_desc "${crest_p50:-N/A}")"
+  echo -e "    Transienti forti:   $(crest_strong_desc "${crest_p95:-N/A}")"
+  echo -e "    Eventi rari:        $(crest_rare_desc "${crest_p99:-N/A}")"
+  echo -e "    Coda dinamica:      $(tail_desc "${tail95:-N/A}")"
+  echo -e "    Impulsi forti:      $(hot_desc "${hot22:-0.0}")"
+  echo ""
+  echo -e "    Profilo:            ${sur_profile}"
+  echo -e "    Interpretazione:    $(sur_profile_interpretation "$sur_profile")"
+  echo -e "    Processing:         $(sur_processing_desc "$sur_profile")"
+  echo -e "    Confidenza:         ${sur_profile_confidence}"
   echo -e "  \033[1;37mPreset:   \033[0m  ${p_color}${preset}\033[0m  (${preset_reason})"
   echo -e "  \033[1;37mConfid.:  \033[0m  ${confidence}  | alternativa: ${alternative}"
   echo -e "  \033[1;37mVolume:   \033[0m  \033[1;36m${volume_status}\033[0m"
@@ -1214,10 +1396,10 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
         pf_color="$(preset_color "$pf_preset")"
         fname="${GLOBAL_METRIC_FILES[$i]}"
         (( ${#fname} > 50 )) && fname="${fname:0:47}..."
-        printf "    %-50s  %b%-5s\033[0m  (Sur=%s, FC=%s, Voice=%s, Mask=%s dB, conf=%s)\n" \
+        printf "    %-50s  %b%-5s\033[0m  (Sur=%s, FC=%s, Voice=%s, Mask=%s dB, src=%s, conf=%s)\n" \
           "$fname" "$pf_color" "$pf_preset" "${GLOBAL_METRIC_VALUES[$i]}" \
           "${GLOBAL_CENTER_DELTA_VALUES[$i]}" "${GLOBAL_VOICE_DELTA_VALUES[$i]}" \
-          "${GLOBAL_VOICE_MASK_VALUES[$i]}" "${GLOBAL_CONFIDENCE_VALUES[$i]}"
+          "${GLOBAL_VOICE_MASK_VALUES[$i]}" "${GLOBAL_SOURCE_CLASS_VALUES[$i]}" "${GLOBAL_CONFIDENCE_VALUES[$i]}"
       done
     fi
   fi
@@ -1282,6 +1464,8 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
         file_hot25="${GLOBAL_HOT25_VALUES[$i]:-0.0}"
         file_sur_profile="${GLOBAL_SUR_PROFILE_VALUES[$i]:-MIXED}"
         file_sur_confidence="${GLOBAL_SUR_CONFIDENCE_VALUES[$i]:-bassa}"
+        file_source_class="${GLOBAL_SOURCE_CLASS_VALUES[$i]:-UNKNOWN}"
+        file_source_bias="${GLOBAL_SOURCE_BIAS_VALUES[$i]:-no}"
         file_width="${GLOBAL_WIDTH_VALUES[$i]:-N/A}"
         file_lra="${GLOBAL_LRA_VALUES[$i]:-N/A}"
         file_delta_fc="${GLOBAL_CENTER_DELTA_VALUES[$i]:-N/A}"
@@ -1292,9 +1476,9 @@ if [[ "${#GLOBAL_METRIC_VALUES[@]}" -gt 0 ]]; then
         file_alternative="${GLOBAL_ALTERNATIVE_VALUES[$i]:--}"
         escaped_path=$(printf '%q' "${GLOBAL_METRIC_PATHS[$i]}")
   
-        # Il commento conserva le metriche, la confidenza e l'alternativa.
-        printf 'FC_PROFILE=%s SUR_PROFILE=%s "$PROC" "$CODEC" "$KEEP" "$BITRATE" %s %s %s  # DeltaSur=%s dB | DeltaFC=%s dB | VoiceDelta=%s dB | VoiceMask=%s dB | Balance=%s dB | Width=%s dB | conf=%s alt=%s | I=%s LUFS LRA=%s LU SamplePeak=%s dBFS | FCBody=%s FCMid=%s FCPresence=%s FCSibilance=%s dBFS | PresenceIndex=%s dB SibilanceIndex=%s dB FCconf=%s | SurWindows=%s CrestP50=%s P90=%s P95=%s P99=%s Max=%s Tail95=%s Tail99=%s Hot22=%s%% Hot25=%s%% SurConf=%s\n' \
-          "${file_fc_profile,,}" "${file_sur_profile,,}" "$file_preset_lower" "$file_volamp" "$escaped_path" "${GLOBAL_METRIC_VALUES[$i]}" \
+        # Il commento conserva le metriche, la confidenza, l'alternativa e la provenienza.
+        printf 'FC_PROFILE=%s SUR_PROFILE=%s SOURCE_CLASS=%s "$PROC" "$CODEC" "$KEEP" "$BITRATE" %s %s %s  # Source=%s AtmosBias=%s | DeltaSur=%s dB | DeltaFC=%s dB | VoiceDelta=%s dB | VoiceMask=%s dB | Balance=%s dB | Width=%s dB | conf=%s alt=%s | I=%s LUFS LRA=%s LU SamplePeak=%s dBFS | FCBody=%s FCMid=%s FCPresence=%s FCSibilance=%s dBFS | PresenceIndex=%s dB SibilanceIndex=%s dB FCconf=%s | SurWindows=%s CrestP50=%s P90=%s P95=%s P99=%s Max=%s Tail95=%s Tail99=%s Hot22=%s%% Hot25=%s%% SurConf=%s\n' \
+          "${file_fc_profile,,}" "${file_sur_profile,,}" "${file_source_class,,}" "$file_preset_lower" "$file_volamp" "$escaped_path" "$file_source_class" "$file_source_bias" "${GLOBAL_METRIC_VALUES[$i]}" \
           "$file_delta_fc" "$file_delta_voice" "$file_voice_mask" "$file_balance" "$file_width" "$file_confidence" "$file_alternative" \
           "$file_loudness" "$file_lra" "$file_input_peak" "$file_fc_body" "$file_fc_mid" "$file_fc_presence" "$file_fc_sibilance" \
           "$file_presence_index" "$file_sibilance_index" "$file_fc_confidence" "$file_sur_active" \

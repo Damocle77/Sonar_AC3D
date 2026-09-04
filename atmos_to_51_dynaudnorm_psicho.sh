@@ -41,6 +41,10 @@ ok(){   echo -e "${C_OK}  $*"; }
 VERIFY_SILENCE_PEAK_DB="-80.0"
 VERIFY_MAX_SAMPLE_DELTA_RATIO="0.02"
 
+# Marker stabile letto dall'analizzatore per riconoscere la provenienza Atmos
+# del bed 5.1 normalizzato. Cambiarlo richiede aggiornare anche l'analizzatore.
+ATMOS_ORIGINAL_TITLE="EAC3 Atmos (Original)"
+
 # Funzione per confermare sovrascrittura
 confirm_overwrite() {
   local target="$1"
@@ -434,7 +438,7 @@ for CUR_FILE in "${FILES[@]}"; do
 
   # Titolo accurato: nel fallback la natura Atmos non e' stata verificata.
   if [[ "$A_TYPE" == "atmos" ]]; then
-    ORIG_TITLE="EAC3 Atmos (Original)"
+    ORIG_TITLE="$ATMOS_ORIGINAL_TITLE"
   else
     ORIG_TITLE="EAC3 Multichannel (Original - Atmos non verificato)"
   fi

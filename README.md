@@ -8,11 +8,11 @@ Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e tra
 
 > Non tutti i supereroi indossano un mantello. Alcuni lanciano `ffmpeg` e salvano i dialoghi dal multiverso del mix sbagliato.
 
-La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier dell'analyzer misura scena full-band, prominenza e timbro della voce centrale, mascheramento, width e dinamica dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
+La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier dell'analyzer misura scena full-band, prominenza e timbro della voce centrale, mascheramento, width e dinamica dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Se il file proviene dal pre-stadio Atmos, l'analyzer riconosce inoltre il marker della traccia Atmos originale e lo usa soltanto come **hint conservativo** per SONAR nei casi borderline: l'origine Atmos non forza mai il preset. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
 
 La taratura 5.1 è pensata per un impianto domestico ibrido con frontali a torre 3 vie, centrale e surround compatti, tutti configurati **Small** con crossover AVR unico intorno a **110 Hz**, uno o due subwoofer attivi gestiti dall'AVR, ascolto medio/basso e priorità all'intelligibilità della voce italiana.
 
-Setup di riferimento: **Yamaha RX-V4A**, frontali **Harman Kardon 3 vie**, centrale/surround **JBL SCS200**, 2x subwoofer **Kenwood ST40**, bass management AVR a **110 Hz**.
+Setup di riferimento: **Yamaha RX-V4A**, TV **77"**, frontali **Harman Kardon 3 vie**, centrale/surround **JBL SCS200**, 2x subwoofer **Kenwood ST40**, bass management AVR a **110 Hz**. Geometria di riferimento: punto d'ascolto sul divano a circa **3,5 m** dal fronte, surround laterali a circa **4 m** orientati di circa **45°**, soffitto a circa **4,10 m**, subwoofer distribuiti frontalmente a sinistra e posteriormente a destra. Distanze, livelli, fase e bass management restano comunque responsabilità dell'AVR e della calibrazione reale della stanza.
 
 I frontali a torre vengono comunque utilizzati come diffusori **Small**: il loro vantaggio è principalmente nella maggiore capacità dinamica e nella migliore riproduzione della gamma medio-alta, mentre il contenuto sotto il crossover resta affidato al bass management dell'AVR.
 
@@ -27,9 +27,9 @@ Il `FRONT_EQ` del processore mantiene il carattere del voicing originale ma ridu
 Obiettivi principali:
 
 - dialoghi intelligibili senza effetto megafono;
-- surround presenti ma non invadenti;
+- surround coerenti ed incisivi ma non invadenti;
 - basso controllato, con gestione principale demandata ad AVR e subwoofer;
-- processing selettivo: SONAR non viene applicato indiscriminatamente;
+- processing selettivo: SONAR (Atmos like) non viene applicato indiscriminatamente;
 - make-up gain finale coerente fra analyzer e processore;
 - batch ripetibili su film, episodi e cartelle intere;
 - conservazione separata del percorso Atmos originale quando richiesta.
@@ -73,7 +73,7 @@ AC3/EAC3 vengono codificati via CPU. L'accelerazione hardware, quando disponibil
 ## Installazione
 
 ```bash
-git clone https://github.com/Damocle77/Sonary_Suite.git
+git clone https://github.com/Damocle77/Psicoacustics.git
 cd Sonary_Suite
 chmod +x *.sh
 ```
@@ -92,11 +92,11 @@ done
 
 | Script | Scopo |
 |---|---|
-| `audio_analyzer_volamp_psycho.sh` | Classifier per 5.1: Delta surround/centro, banda e profilo tonale FC, dinamica surround, width, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e batch opzionale |
+| `audio_analyzer_volamp_psycho.sh` | Classifier per 5.1: Delta surround/centro, banda e profilo tonale FC, dinamica surround, width, riconoscimento provenienza Atmos via marker, target `-21 LUFS`, volamp automatico **4.0–5.5 dB** e batch opzionale |
 | `aegis_sonar_wide_aura_voice_volamp_psycho.sh` | Processore 5.1 con preset `aegis`, `sonar`, `wide`, `aura`, `voice`, profili FC/surround content-aware, peak catcher FC e controllo LFE |
 | `stereo251_upmix_psycho.sh` | Upmix stereo → 5.1 plausibile: matrice L-R, centro assist, LFE minimo, output atomico/verificato e preset `quad` dedicato alla musica |
 | `asmr_vr_intimate_psycho.sh` | Processing stereo per cuffie/ASMR/VR con BS2B, ITD opzionale, loudnorm post-DSP, LFO e output atomico/verificato |
-| `atmos_to_51_dynaudnorm_psicho.sh` | Prepara un MKV con EAC3 5.1 normalizzata come primaria e traccia Atmos/EAC3 originale copiata come secondaria |
+| `atmos_to_51_dynaudnorm_psicho.sh` | Prepara un MKV con EAC3 5.1 normalizzata come primaria e traccia Atmos/EAC3 originale copiata come secondaria; il titolo stabile della traccia Atmos funge da marker per l'analyzer |
 
 > Nota naming: il file Atmos mantiene il nome storico `psicho`. Il README usa il nome reale del file.
 
@@ -154,6 +154,8 @@ Le metriche full-band restano dedicate alla scelta del trattamento spaziale.
 - fake-5.1 gate: se i surround sono virtualmente muti, forza `voice`;
 - priorità a `voice` quando il centro è debole o mascherato nella banda 250-5000 Hz;
 - `sonar` per surround molto arretrati, `aura` per arretramento moderato;
+- riconoscimento opzionale della provenienza Atmos tramite il titolo stabile della traccia originale `EAC3 Atmos (Original)`;
+- bias Atmos prudenziale: può promuovere **solo `AURA` a `SONAR`** in una stretta zona borderline, senza scavalcare `VOICE`, `WIDE` o un profilo surround `TRANSIENT`;
 - `wide` quando SL/SR risultano stretti o collassati, `aegis` per mix equilibrati;
 - verdetto stagionale modale con almeno **2/3 di consenso**; altrimenti `MIXED`;
 - `MIXED` anche quando lo spread di `DeltaSur` supera `4 dB`;
@@ -223,6 +225,17 @@ Nella modalità `--files`, il token dopo il bitrate viene interpretato come `run
 | 6 | `DeltaSur < -7 dB` | `aura` | surround moderatamente arretrati, intervento posteriore morbido |
 | 7 | altrimenti | `aegis` | scena equilibrata, trattamento DTS:X-like bilanciato |
 
+Questa tabella descrive il **classifier base**. Se nel container è presente una traccia audio con titolo esatto `EAC3 Atmos (Original)`, l'analyzer imposta internamente `SOURCE_CLASS=ATMOS` e può applicare un bias SONAR esclusivamente dopo la decisione base:
+
+| Provenienza | Profilo SUR | Preset base | `DeltaSur` | Risultato |
+|---|---|---|---:|---|
+| Atmos | `AMBIENT` | `AURA` | `< -11.5 dB` | `SONAR`, confidenza bassa, alternativa `AURA` |
+| Atmos | `MIXED` | `AURA` | `< -12.0 dB` | `SONAR`, confidenza bassa, alternativa `AURA` |
+| Atmos | `TRANSIENT` | qualunque | qualunque | nessun bias |
+| non Atmos / marker assente | qualunque | qualunque | qualunque | classifier base invariato |
+
+La soglia SONAR ordinaria resta quindi **`-13 dB`**. Il marker Atmos è una prova di provenienza del file intermedio, non una prova che il bed 5.1 sfrutti realmente altezza/oggetti in modo significativo. `VOICE` e `WIDE` non vengono mai sovrascritti dal bias Atmos.
+
 Surround muti, centrale silenzioso o sbilanciamento SL/SR elevato attivano gli override di sicurezza. Se la banda 250-5000 Hz è praticamente vuota, `VoiceDelta` e `VoiceMask` vengono ignorati e resta attivo il controllo full-band.
 
 ## Width MS
@@ -255,9 +268,9 @@ Per i surround, SL e SR sono analizzati in finestre da un secondo. Le finestre q
 
 | Profilo | Interpretazione | Adattamento DSP |
 |---|---|---|
-| `AMBIENT` | energia diffusa e continua | delay e layer tardivi completi |
-| `MIXED` | comportamento intermedio o incerto | delay `×0.90`, layer tardivi `×0.85` |
-| `TRANSIENT` | effetti brevi e crest elevato | delay `×0.70`, layer tardivi `×0.55` |
+| `AMBIENT` | energia diffusa e continua | delay `×1.00`, late `×1.00`, air `×1.00` |
+| `MIXED` | comportamento intermedio o incerto | delay `×0.90`, late `×0.85`, air `×0.90` |
+| `TRANSIENT` | effetti brevi e crest elevato | delay `×0.70`, late `×0.55`, air `×0.75` |
 
 Servono almeno 10 finestre attive per una decisione affidabile; altrimenti viene usato `MIXED` con confidenza bassa.
 
@@ -285,7 +298,7 @@ Il minimo automatico resta quindi **4.0 dB**. Il cap LRA non può scendere sotto
 Quando `run=si`, il batch contiene righe simili a:
 
 ```bash
-FC_PROFILE=normal SUR_PROFILE=ambient "$PROC" "$CODEC" "$KEEP" "$BITRATE" sonar 4.5 film.mkv  # DeltaSur=-14.2 dB | DeltaFC=1.0 dB | VoiceDelta=2.3 dB | VoiceMask=-12.0 dB | Width=-4.1 dB | I=-21.9 LUFS
+FC_PROFILE=normal SUR_PROFILE=ambient SOURCE_CLASS=atmos "$PROC" "$CODEC" "$KEEP" "$BITRATE" sonar 4.5 film.mkv  # Source=ATMOS AtmosBias=sonar | DeltaSur=-12.4 dB | DeltaFC=1.0 dB | VoiceDelta=2.3 dB | VoiceMask=-12.0 dB | Width=-4.1 dB | I=-21.9 LUFS
 ```
 
 L'ultimo parametro numerico è il volamp realmente passato al processore. Il batch usa:
@@ -294,7 +307,7 @@ L'ultimo parametro numerico è il volamp realmente passato al processore. Il bat
 PROC="${PROC:-./aegis_sonar_wide_aura_voice_volamp_psycho.sh}"
 ```
 
-Il batch usa sempre il preset per-file, derivato da `DeltaSur`, `DeltaFC`, `VoiceDelta`, `VoiceMask`, balance, `Width MS` ed eventuali override di sicurezza. Passa inoltre al processore `FC_PROFILE` e `SUR_PROFILE`, mantenendo le metriche complete nel commento della riga. Il P25 di `DeltaSur` è soltanto diagnostico; il verdetto stagionale richiede almeno 2/3 di consenso e non sostituisce mai il preset scritto nelle singole righe del batch.
+Il batch usa sempre il preset per-file, derivato da `DeltaSur`, `DeltaFC`, `VoiceDelta`, `VoiceMask`, balance, `Width MS` ed eventuali override di sicurezza. Passa inoltre al processore `FC_PROFILE`, `SUR_PROFILE` e `SOURCE_CLASS`, mantenendo nel commento anche `Source=...` e `AtmosBias=...` oltre alle metriche complete. `SOURCE_CLASS` è informativa nel processore: l'eventuale bias Atmos è già stato deciso dall'analyzer e il DSP non applica un secondo override. Il P25 di `DeltaSur` è soltanto diagnostico; il verdetto stagionale richiede almeno 2/3 di consenso e non sostituisce mai il preset scritto nelle singole righe del batch.
 
 ---
 
@@ -311,7 +324,8 @@ Motore principale per tracce **5.1 esistenti**.
 - EQ voce dedicato per ogni preset;
 - profilo tonale FC content-aware con correzioni statiche molto contenute e fallback `NORMAL` neutro;
 - processing surround differenziato per preset;
-- profilo temporale surround che adatta delay e layer tardivi senza compressori o transient shaper;
+- profilo temporale surround che adatta delay, layer tardivi e air/decorrelation senza compressori o transient shaper;
+- `SOURCE_CLASS` ricevuta dall'analyzer solo a scopo informativo: nessun secondo bias o override nel processore;
 - air/decorrelation layer controllato;
 - trattamento LFE: high-pass `32 Hz`, low-pass `110 Hz`, volamp prima del limiter dedicato;
 - diffusori mantenuti `Small`, con bass management e crossover a circa `110 Hz` affidati all'AVR; lo script applica ai canali principali solo un high-pass di sicurezza a `40 Hz`;
@@ -383,14 +397,14 @@ Il centrale usa inoltre un peak catcher locale con `limit=0.94`, attack `1.5 ms`
 
 ## Profili ricevuti dall'analyzer
 
-Il batch imposta due variabili d'ambiente per ogni file:
+Il batch imposta tre variabili d'ambiente per ogni file:
 
 ```bash
-FC_PROFILE=normal SUR_PROFILE=mixed \
+FC_PROFILE=normal SUR_PROFILE=mixed SOURCE_CLASS=atmos \
   "$PROC" "$CODEC" "$KEEP" "$BITRATE" aegis 4.0 "film.mkv"
 ```
 
-`FC_PROFILE` accetta `dark`, `normal`, `bright`, `sibilant`; `SUR_PROFILE` accetta `ambient`, `mixed`, `transient`. Valori mancanti o non validi ricadono rispettivamente su `normal` e `mixed`. Le correzioni FC sono nell'ordine di pochi decimi di dB; il profilo surround modifica soltanto delay, layer tardivi e decorrelazione.
+`FC_PROFILE` accetta `dark`, `normal`, `bright`, `sibilant`; `SUR_PROFILE` accetta `ambient`, `mixed`, `transient`; `SOURCE_CLASS` accetta `atmos`, `unknown` o `standard`. Se il processore viene lanciato direttamente senza variabili, i fallback sono `FC_PROFILE=normal`, `SUR_PROFILE=legacy` e `SOURCE_CLASS=unknown`. `LEGACY` mantiene scale surround `1.00/1.00/1.00` e quindi il comportamento storico. Le correzioni FC sono nell'ordine di pochi decimi di dB; il profilo surround modifica soltanto delay, layer tardivi e decorrelazione. `SOURCE_CLASS` viene soltanto mostrata nel log: non modifica il DSP, perché il bias è già stato applicato dall'analyzer.
 
 Il file prodotto resta **5.1 con un solo canale LFE**. Un eventuale impianto **5.2** distribuisce il canale `.1` ai due subwoofer tramite l'AVR; lo script non crea due canali LFE separati.
 
@@ -765,8 +779,11 @@ Lo script non tenta di reinserire automaticamente l'Atmos originale nei file pro
 ## Sintassi
 
 ```bash
-./atmos_to_51_dynaudnorm_psicho.sh <file|directory|""> [bitrate]
+./atmos_to_51_dynaudnorm_psicho.sh [bitrate] <file|directory|"">
+./atmos_to_51_dynaudnorm_psicho.sh --files <bitrate> <file1> [file2 ...]
 ```
+
+Resta accettato per compatibilità il vecchio ordine `<file|directory|""> [bitrate]`.
 
 ## Parametri
 
@@ -785,11 +802,30 @@ Lo script:
 - se Atmos non è rilevabile, usa il miglior EAC3 multicanale come fallback;
 - invia il warning di fallback su `stderr`, senza contaminare il valore restituito dalla funzione di probe.
 
-Se il fallback non è verificato come Atmos, il titolo della seconda traccia diventa:
+Quando Atmos è verificato, la seconda traccia riceve il titolo stabile:
+
+```text
+EAC3 Atmos (Original)
+```
+
+Questo titolo è anche il **marker di provenienza** letto dall'analyzer. Se il fallback non è verificato come Atmos, il titolo della seconda traccia diventa invece:
 
 ```text
 EAC3 Multichannel (Original - Atmos non verificato)
 ```
+
+e in questo caso l'analyzer non applica alcun bias Atmos.
+
+## Integrazione con l'analyzer
+
+L'analyzer continua ad analizzare la **prima traccia 5.1 normalizzata**. La seconda traccia non entra nelle misure RMS/EBU/FC/SUR: viene interrogato soltanto il suo titolo per determinare la provenienza.
+
+```text
+Traccia 1  EAC3 5.1 – Normalized   → misure + classifier
+Traccia 2  EAC3 Atmos (Original)    → marker SOURCE_CLASS=ATMOS
+```
+
+Il marker Atmos non impone SONAR. Viene usato solo per promuovere un risultato base `AURA` a `SONAR` quando `DeltaSur` è già vicino alla soglia SONAR e la dinamica surround è compatibile: fino a `-11.5 dB` con `AMBIENT`, fino a `-12.0 dB` con `MIXED`; nessun bias con `TRANSIENT`. Questo evita di trattare come equivalente un Atmos realmente immersivo e un Atmos formalmente presente ma poco sfruttato nel mix.
 
 ## Dynaudnorm
 
@@ -842,10 +878,11 @@ Lingua e metadata principali vengono propagati. Lo script mantiene contatori `OK
 ## Esempi
 
 ```bash
-./atmos_to_51_dynaudnorm_psicho.sh "film.mkv"
-./atmos_to_51_dynaudnorm_psicho.sh "film.mkv" 768k
-./atmos_to_51_dynaudnorm_psicho.sh /path/to/folder
-./atmos_to_51_dynaudnorm_psicho.sh "" 768k
+./atmos_to_51_dynaudnorm_psicho.sh 640k "film.mkv"
+./atmos_to_51_dynaudnorm_psicho.sh 768k "film.mkv"
+./atmos_to_51_dynaudnorm_psicho.sh 640k /path/to/folder
+./atmos_to_51_dynaudnorm_psicho.sh 768k ""
+./atmos_to_51_dynaudnorm_psicho.sh --files 768k "film1.mkv" "film2.mkv"
 ```
 
 ---
@@ -870,10 +907,13 @@ Atmos/JOC
    - 5.1 normalizzata default
    - Atmos originale secondaria
 → analyzer
+   - analizza la 5.1 normalizzata
+   - legge il marker della seconda traccia
+   - usa Atmos solo come bias SONAR borderline
 → processing psicoacustico opzionale
 ```
 
-Il file dual-track resta il riferimento per la riproduzione Atmos non alterata. Il file psicoacustico è un'alternativa separata.
+Il file dual-track resta il riferimento per la riproduzione Atmos non alterata. Il file psicoacustico è un'alternativa separata. Il fatto che la sorgente sia Atmos non implica automaticamente l'uso di SONAR: il contenuto misurato resta il criterio principale.
 
 ## Sorgente stereo destinata al 5.1
 
@@ -995,10 +1035,10 @@ Oppure:
 ## Il file è Atmos/EAC3
 
 ```bash
-./atmos_to_51_dynaudnorm_psicho.sh "film_atmos.mkv" 768k
+./atmos_to_51_dynaudnorm_psicho.sh 768k "film_atmos.mkv"
 ```
 
-Il risultato contiene la 5.1 normalizzata come traccia default e l'originale come seconda traccia. Per Atmos non alterato selezionare la seconda; per il processing usare la prima.
+Il risultato contiene la 5.1 normalizzata come traccia default e l'originale come seconda traccia. Se Atmos è stato verificato, la seconda traccia è marcata `EAC3 Atmos (Original)`; l'analyzer riconosce questo titolo automaticamente e segnala in console `Origine: ATMOS`. Per Atmos non alterato selezionare la seconda; per il processing usare la prima. Il marker non forza SONAR: abilita soltanto il bias borderline documentato sopra.
 
 ## L'analyzer forza VOICE
 
@@ -1087,6 +1127,7 @@ In sessione non interattiva, un output già esistente viene normalmente saltato.
 # Cosa la suite non fa
 
 - non crea Atmos reale da materiale non Atmos;
+- non considera l'etichetta Atmos sufficiente per scegliere SONAR: la provenienza è soltanto un hint;
 - non renderizza gli oggetti Atmos come un AVR;
 - non sostituisce calibrazione, distanze, livelli e bass management dell'AVR;
 - non ricostruisce informazioni assenti dalla sorgente;

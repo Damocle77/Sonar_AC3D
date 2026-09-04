@@ -61,6 +61,30 @@ for _bin in ffmpeg ffprobe; do
   command -v "$_bin" &>/dev/null || { err "$_bin non trovato nel PATH"; exit 1; }
 done
 
+# Verifica preventiva delle capability FFmpeg realmente usate dal processore.
+# Evita di iniziare un encode lungo con una build priva di un filtro indispensabile.
+check_required_ffmpeg_filters() {
+  local filters_dump filter
+  local -a required_filters=(
+    aformat pan channelsplit highpass lowpass equalizer highshelf volume
+    adelay allpass asplit amix join alimiter astats ebur128
+  )
+
+  filters_dump="$(ffmpeg -hide_banner -filters 2>/dev/null)" || {
+    err "Impossibile interrogare i filtri disponibili nella build FFmpeg corrente."
+    return 1
+  }
+
+  for filter in "${required_filters[@]}"; do
+    if ! awk -v f="$filter" '$2 == f { found=1 } END { exit !found }' <<<"$filters_dump"; then
+      err "Filtro FFmpeg richiesto non disponibile: $filter"
+      return 1
+    fi
+  done
+}
+
+check_required_ffmpeg_filters || exit 1
+
 usage() {
   cat <<'USAGE'
 -----------------------------------------------------------------------------------------------------------
@@ -208,28 +232,50 @@ case "$FC_PROFILE" in
     ;;
 esac
 
-# Profilo temporale surround passato opzionalmente dall'analizzatore. MIXED e'
-# il fallback prudenziale; i coefficienti iniziali richiedono ascolto sul corpus.
-SUR_PROFILE="${SUR_PROFILE:-mixed}"
+# Provenienza della sorgente rilevata dall'analizzatore. Informativa soltanto:
+# il preset e' gia' stato deciso a monte e qui non viene applicato alcun bias.
+SOURCE_CLASS="${SOURCE_CLASS:-unknown}"
+SOURCE_CLASS="${SOURCE_CLASS,,}"
+case "$SOURCE_CLASS" in
+  atmos|unknown|standard) ;;
+  *)
+    warn "SOURCE_CLASS '$SOURCE_CLASS' non valido: uso UNKNOWN."
+    SOURCE_CLASS="unknown"
+    ;;
+esac
+
+# Profilo temporale surround passato opzionalmente dall'analizzatore.
+# LEGACY preserva esattamente il comportamento storico quando il processore
+# viene lanciato direttamente senza una decisione V7 dell'analizzatore.
+SUR_PROFILE="${SUR_PROFILE:-legacy}"
 SUR_PROFILE="${SUR_PROFILE,,}"
 case "$SUR_PROFILE" in
+  legacy)
+    SUR_DELAY_SCALE="1.00"
+    SUR_LATE_SCALE="1.00"
+    SUR_AIR_SCALE="1.00"
+    ;;
   ambient)
     SUR_DELAY_SCALE="1.00"
     SUR_LATE_SCALE="1.00"
+    SUR_AIR_SCALE="1.00"
     ;;
   mixed)
     SUR_DELAY_SCALE="0.90"
     SUR_LATE_SCALE="0.85"
+    SUR_AIR_SCALE="0.90"
     ;;
   transient)
     SUR_DELAY_SCALE="0.70"
     SUR_LATE_SCALE="0.55"
+    SUR_AIR_SCALE="0.75"
     ;;
   *)
-    warn "SUR_PROFILE '$SUR_PROFILE' non valido: uso MIXED."
-    SUR_PROFILE="mixed"
-    SUR_DELAY_SCALE="0.90"
-    SUR_LATE_SCALE="0.85"
+    warn "SUR_PROFILE '$SUR_PROFILE' non valido: uso LEGACY."
+    SUR_PROFILE="legacy"
+    SUR_DELAY_SCALE="1.00"
+    SUR_LATE_SCALE="1.00"
+    SUR_AIR_SCALE="1.00"
     ;;
 esac
 
@@ -321,10 +367,35 @@ case "$SUR_MODE" in
 esac
 
 # Log dei parametri finali: utile per confermare cosa è stato interpretato dallo script, soprattutto con parsing flessibile.
+case "$SUR_PROFILE" in
+  legacy)
+    SUR_PROFILE_DESC="comportamento storico invariato"
+    SUR_PROCESSING_DESC="delay 0% | late 0% | air 0%"
+    ;;
+  ambient)
+    SUR_PROFILE_DESC="surround continui/atmosferici; massima spazialita'"
+    SUR_PROCESSING_DESC="delay 0% | late 0% | air 0%"
+    ;;
+  mixed)
+    SUR_PROFILE_DESC="transienti presenti ma non dominanti; compromesso spazio/punch"
+    SUR_PROCESSING_DESC="delay -10% | late -15% | air -10%"
+    ;;
+  transient)
+    SUR_PROFILE_DESC="transienti forti e ricorrenti; priorita' al punch"
+    SUR_PROCESSING_DESC="delay -30% | late -45% | air -25%"
+    ;;
+esac
+
 info "Codec output:   $OUT_CODEC"
 info "Surround mode:  $SUR_MODE ($DESC)"
 info "FC profile:     ${FC_PROFILE^^} (content-aware conservativo)"
-info "Sur profile:    ${SUR_PROFILE^^} (delay x${SUR_DELAY_SCALE}, late gain x${SUR_LATE_SCALE})"
+if [[ "$SOURCE_CLASS" == "atmos" ]]; then
+  info "Source class:    ATMOS (hint gia' valutato dall'analizzatore; nessun override nel DSP)"
+else
+  info "Source class:    ${SOURCE_CLASS^^}"
+fi
+info "Sur profile:    ${SUR_PROFILE^^} — ${SUR_PROFILE_DESC}"
+info "Processing SUR: ${SUR_PROCESSING_DESC}"
 info "Bitrate Target: $BITRATE"
 info "Final volamp:   $VOLAMP_LABEL"
 
@@ -408,6 +479,10 @@ scale_sur_delay() {
 
 scale_sur_gain() {
   awk -v value="$1" -v scale="$SUR_LATE_SCALE" 'BEGIN { printf "%.3f", value*scale }'
+}
+
+scale_sur_air_gain() {
+  awk -v value="$1" -v scale="$SUR_AIR_SCALE" 'BEGIN { printf "%.3f", value*scale }'
 }
 
 # Equalizzazione sartioriale della voce per preset surround, con EQ mirato per intelligibilità mantenendo la dinamica naturale. Serve a dare presenza alla voce senza rubare scena ai frontali.
@@ -561,7 +636,7 @@ set_preset_profile() {
       exit 1
       ;;
   esac
-  DECORR_GAIN="$(scale_sur_gain "$DECORR_GAIN")"
+  DECORR_GAIN="$(scale_sur_air_gain "$DECORR_GAIN")"
 }
 
 # Funzione per costruire il blocco di split dei canali in ingresso con mapping posizionale.
