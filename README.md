@@ -6,7 +6,7 @@
 
 Suite di script **Bash + FFmpeg** per analizzare, normalizzare, correggere e trasformare tracce audio stereo, 5.1 ed EAC3 Atmos/JOC in modo offline, ripetibile e controllato.
 
-> Non tutti i supereroi indossano un mantello. Alcuni lanciano `ffmpeg` e salvano i dialoghi dal multiverso del mix sbagliato.
+> Non tutti i supereroi indossano un mantello. Alcuni usano `ffmpeg` per salvare il multiverso del mix audio.
 
 La filosofia è semplice: **misurare prima, processare dopo**. Il Classifier dell'analyzer misura scena full-band, prominenza e timbro della voce centrale, mascheramento, width e dinamica dei surround; sceglie quindi il preset per-file più adatto e può generare un batch riproducibile. Se il file proviene dal pre-stadio Atmos, l'analyzer riconosce inoltre il marker della traccia Atmos originale e lo usa soltanto come **hint conservativo** per SONAR nei casi borderline: l'origine Atmos non forza mai il preset. Gli altri script coprono upmix stereo, preparazione Atmos/EAC3 e processing binaurale per cuffie.
 
@@ -77,15 +77,6 @@ git clone https://github.com/Damocle77/Psicoacustics.git
 cd Sonary_Suite
 chmod +x *.sh
 ```
-
-Controllo sintattico rapido:
-
-```bash
-for f in *.sh; do
-  bash -n "$f" || exit 1
-done
-```
-
 ---
 
 ## Script inclusi
@@ -1127,13 +1118,9 @@ In sessione non interattiva, un output già esistente viene normalmente saltato.
 # Cosa la suite non fa
 
 - non crea Atmos reale da materiale non Atmos;
-- non considera l'etichetta Atmos sufficiente per scegliere SONAR: la provenienza è soltanto un hint;
-- non renderizza gli oggetti Atmos come un AVR;
 - non sostituisce calibrazione, distanze, livelli e bass management dell'AVR;
 - non ricostruisce informazioni assenti dalla sorgente;
 - non garantisce lo stesso risultato su casse, stanza e volume differenti;
-- non usa AI o DSP opachi;
-- non elimina la necessità di un confronto A/B.
 
 ---
 
@@ -1147,4 +1134,4 @@ MIT License
 
 **Sandro (D@mocle77) Sabbioni**
 
-> Per riportare ordine nella Forza Sonora serve solo uno script Bash. Questa è la via.
+> Per riportare ordine nella Forza Sonora serve solo uno script Bash. Questa è la via...
