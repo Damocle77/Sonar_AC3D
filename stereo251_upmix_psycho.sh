@@ -219,9 +219,12 @@ FILTERED_FILES=()
 for f in "${FILES[@]}"; do
   case "$f" in
     *_UPMIX_5.1_MODERN.mkv|*_UPMIX_5.1_VINTAGE.mkv|\
-    *_UPMIX_5.1_TO51.mkv|*_UPMIX_5.1_QUAD.mkv|\
-    *_UPMIX_5.1_*_MODERN.mkv|*_UPMIX_5.1_*_VINTAGE.mkv|\
-    *_UPMIX_5.1_*_TO51.mkv|*_UPMIX_5.1_*_QUAD.mkv)
+    *_UPMIX_5.1_PSY160_MODERN.mkv|*_UPMIX_5.1_PSY160_VINTAGE.mkv|\
+    *_UPMIX_5.1_V5_MODERN.mkv|*_UPMIX_5.1_V5_VINTAGE.mkv|\
+    *_UPMIX_5.1_V6_MODERN.mkv|*_UPMIX_5.1_V6_VINTAGE.mkv|\
+    *_UPMIX_5.1_V7_MODERN.mkv|*_UPMIX_5.1_V7_VINTAGE.mkv|\
+    *_UPMIX_5.1_V8_TO51.mkv|*_UPMIX_5.1_V8_QUAD.mkv|\
+    *_UPMIX_5.1_V9_TO51.mkv|*_UPMIX_5.1_V9_QUAD.mkv)
       info "Skip output gia' upmixato: $f"
       continue
       ;;
@@ -235,7 +238,7 @@ FILES=("${FILTERED_FILES[@]}")
 (( ${#FILES[@]} == 0 )) && { err "Nessun file trovato da processare."; exit 1; }
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Configurazione dei preset correnti
+# Configurazione preset V9
 # Defaults interni: non serve esportare variabili prima del lancio.
 # Le variabili sono comunque sovrascrivibili dall'ambiente per debug avanzato.
 # ────────────────────────────────────────────────────────────────────────────────
@@ -266,7 +269,7 @@ case "$MODE" in
     # Psicoacustica leggera: allpass + air a basso livello.
     SUR_EQ="highpass=f=170:t=q:w=0.707,lowpass=f=8500,equalizer=f=5200:t=q:w=1.4:g=0.3,equalizer=f=7200:t=q:w=2.0:g=-0.8"
     BED_EQ="highpass=f=320:t=q:w=0.707,lowpass=f=5600,equalizer=f=700:t=q:w=1.1:g=-2.0,equalizer=f=1500:t=q:w=1.2:g=-5.5,equalizer=f=2600:t=q:w=1.4:g=-6.0,equalizer=f=4000:t=q:w=1.6:g=-3.0,equalizer=f=5200:t=q:w=1.8:g=-1.0"
-    MODE_TITLE="TO51 Plausible Matrix"
+    MODE_TITLE="TO51"
     ;;
 
   quad)
@@ -286,7 +289,7 @@ case "$MODE" in
     QUAD_HP="${QUAD_HP:-250}"
     QUAD_LP="${QUAD_LP:-8000}"
     QUAD_AIR_VOL="${QUAD_AIR_VOL:-0.035}"
-    MODE_TITLE="QUAD Music Weighted"
+    MODE_TITLE="QUAD"
     ;;
 esac
 
@@ -561,7 +564,7 @@ for CUR_FILE in "${FILES[@]}"; do
     UPMIX_FILTER="$(build_quad_filter)"
   fi
 
-  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_${MODE^^}.mkv"
+  OUT_FILE="${CUR_FILE%.*}_UPMIX_5.1_V9_${MODE^^}.mkv"
 
   # Controllo sovrascrittura
   if [[ -f "$OUT_FILE" ]]; then
@@ -590,13 +593,13 @@ for CUR_FILE in "${FILES[@]}"; do
     -map "0:s?" -c:s copy
     -map "0:t?" -c:t copy
     -map "[aout]" -c:a:0 "$OUT_CODEC" -b:a:0 "$BITRATE" -dialnorm -31 -ar:a:0 48000 -ac:a:0 6
-    -metadata:s:a:0 title="${OUT_CODEC^^} 5.1 - Upmix ${MODE_TITLE}"
+    -metadata:s:a:0 title="${OUT_CODEC^^} 5.1 Upmix ${MODE_TITLE}"
     -disposition:a:0 default
   )
 
   if [[ "$KEEP_STEREO" == "si" ]]; then
     CMD+=( -map 0:"$A_STREAM_INDEX" -c:a:1 copy
-           -metadata:s:a:1 title="Stereo Originale 2.0"
+           -metadata:s:a:1 title="Stereo 2.0 Original"
            -disposition:a:1 0 )
   fi
   # Aggiunge metadata lingua se disponibile e diversa da "und"

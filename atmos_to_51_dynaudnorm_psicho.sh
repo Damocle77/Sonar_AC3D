@@ -41,10 +41,6 @@ ok(){   echo -e "${C_OK}  $*"; }
 VERIFY_SILENCE_PEAK_DB="-80.0"
 VERIFY_MAX_SAMPLE_DELTA_RATIO="0.02"
 
-# Marker stabile letto dall'analizzatore per riconoscere la provenienza Atmos
-# del bed 5.1 normalizzato. Cambiarlo richiede aggiornare anche l'analizzatore.
-ATMOS_ORIGINAL_TITLE="EAC3 Atmos (Original)"
-
 # Funzione per confermare sovrascrittura
 confirm_overwrite() {
   local target="$1"
@@ -172,7 +168,7 @@ find_atmos_stream() {
   local raw_data
 
   # Un solo probe per i dati stabili. L'ordinale audio viene conservato per
-  # interrogare profile/joc_complexity sui singoli stream.
+  # interrogare il profilo ufficiale E-AC-3 sui singoli stream.
   raw_data=$(ffprobe -v error -select_streams a \
     -show_entries stream=index,codec_name,channels:stream_disposition=default:stream_tags=language \
     -of csv=p=0 "$f" 2>/dev/null | tr -d '\r' || true)
@@ -200,17 +196,10 @@ find_atmos_stream() {
       continue
     fi
 
-    local is_atmos=false profile_str joc
+    local is_atmos=false profile_str
     profile_str=$(ffprobe -v error -select_streams "a:${audio_ord}" \
       -show_entries stream=profile -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d '\r' || true)
     [[ "${profile_str,,}" == *"atmos"* ]] && is_atmos=true
-
-    if [[ "$is_atmos" == false ]]; then
-      joc=$(ffprobe -v error -select_streams "a:${audio_ord}" \
-        -show_entries frame_side_data=joc_complexity -read_intervals "%+#1" \
-        -of csv=p=0 "$f" 2>/dev/null | head -1 | tr -d '\r' || true)
-      [[ -n "$joc" && "$joc" != "0" ]] && is_atmos=true
-    fi
 
     local score=0
     [[ "$def" == "1" ]] && score=$((score + 200))
@@ -237,7 +226,7 @@ find_atmos_stream() {
   if [[ -n "$best_fallback" ]]; then
     local fb_idx fb_ch fb_lang fb_type
     IFS='|' read -r fb_idx fb_ch fb_lang fb_type <<<"$best_fallback"
-    warn "Nessun flag Atmos esplicito trovato — uso traccia EAC3 ${fb_ch}ch (idx:${fb_idx}) come fallback" >&2
+    warn "Nessun profilo Atmos esplicito trovato — uso traccia EAC3 ${fb_ch}ch (idx:${fb_idx}) come fallback" >&2
     echo "$best_fallback"
     return 0
   fi
@@ -438,9 +427,9 @@ for CUR_FILE in "${FILES[@]}"; do
 
   # Titolo accurato: nel fallback la natura Atmos non e' stata verificata.
   if [[ "$A_TYPE" == "atmos" ]]; then
-    ORIG_TITLE="$ATMOS_ORIGINAL_TITLE"
+    ORIG_TITLE="EAC3 Atmos Original"
   else
-    ORIG_TITLE="EAC3 Multichannel (Original - Atmos non verificato)"
+    ORIG_TITLE="EAC3 Original"
   fi
 
   # FFmpeg command
@@ -458,7 +447,7 @@ for CUR_FILE in "${FILES[@]}"; do
     -filter_complex "$FILTER_COMPLEX"
     -map "[aout]"
     -c:a:0 eac3 -b:a:0 "$BITRATE" -dialnorm -31 -ar:a:0 48000 -ac:a:0 6
-    -metadata:s:a:0 "title=EAC3 5.1 – Normalized"
+    -metadata:s:a:0 "title=EAC3 5.1 Normalized"
     -disposition:a:0 default
 
     # Traccia 2: Atmos originale (copia bit-perfect)

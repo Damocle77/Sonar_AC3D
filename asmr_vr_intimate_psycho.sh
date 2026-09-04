@@ -2,14 +2,14 @@
 set -uo pipefail
 
 # ╭──────────────────────────────────────────────────────────────────────────────╮
-# │   asmr_vr_intimate_psycho.sh - Settembre 2026                                      │
+# │   asmr_vr_intimate_psycho.sh - Settembre 2026                                │
 # │   By Sandro (D@mocle77) Sabbioni                                             │
 # │                                                                              │
 # │   Processing binaurale ottimizzato per ASMR / VR / contenuto intimo.         │
 # │   Simula vicinanza della sorgente sonora (20-50cm) con crossfeed BS2B        │
 # │   J.Meier, ITD (Interaural Time Difference) e EQ psicoacustico.              │
 # │                                                                              │
-# │   FUNZIONI PRINCIPALI:                                                       │
+# │   CHANGELOG V3:                                                              │
 # │     - Rimosso set -e (allineato a aegis/analyzer/upmix)                      │
 # │     - Selezione stream score-based (stereo, default, ita)                    │
 # │     - Output atomico e verifica comparativa prima della pubblicazione        │
@@ -268,9 +268,9 @@ ITD_WHISPER="adelay=delays=0|18S:all=0"
 ITD_NEAR="adelay=delays=0|10S:all=0"
 ITD_CENTER=""
 
-# LFO Breathing Effect: tremolo + flanger.
-# Il filtro pan accetta coefficienti statici, quindi la modulazione lenta
-# dell'ampiezza usa tremolo (0.12 Hz = circa un respiro ogni 8 secondi).
+# LFO Breathing Effect (V2: tremolo + flanger)
+# V1 usava pan= con sin(t) — non supportato da ffmpeg (pan accetta solo coefficienti statici).
+# V2 usa tremolo (modulazione ampiezza lenta, 0.12 Hz = ~1 respiro ogni 8 sec)
 # + flanger (micro-modulazione fase per effetto "movimento" della sorgente).
 # Il risultato e' un leggero "respiro" nell'immagine stereo senza artefatti.
 LFO_PART="tremolo=f=0.12:d=0.06,flanger=delay=2:depth=1.5:regen=0:width=40:speed=0.15:shape=sinusoidal:phase=50"
@@ -474,7 +474,7 @@ for CUR_FILE in "$@"; do
     -map "0:s?" -c:s copy
     -map "0:t?" -c:t copy
     -map "[aout]" -c:a:0 "$A_ENCODER" -ac:a:0 2 -ar:a:0 48000
-    -metadata:s:a:0 title="VR Intimate (${T}) – BS2B J.Meier"
+    -metadata:s:a:0 title="VR Intimate ${T}"
     -disposition:a:0 default
   )
 
@@ -488,7 +488,7 @@ for CUR_FILE in "$@"; do
   # Keep originale come traccia secondaria
   if [[ "$KEEP_ORIG" -eq 1 ]]; then
     CMD+=( -map 0:"$A_STREAM_INDEX" -c:a:1 copy
-           -metadata:s:a:1 title="Stereo Originale"
+           -metadata:s:a:1 title="Stereo Original"
            -disposition:a:1 0 )
     [[ -n "$A_LANG" && "${A_LANG,,}" != "und" ]] && CMD+=( -metadata:s:a:1 language="$A_LANG" )
   fi
